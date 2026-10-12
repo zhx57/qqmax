@@ -173,7 +173,7 @@ class 设置页 : SettingsActivity() {
                 .text("设置")
                 .textSize(26f)
                 .textColor(M3.onSurface)
-                .typeface(Typeface.DEFAULT_BOLD)
+                .apply { typeface = Typeface.DEFAULT_BOLD }
                 .padding(left = 4.dp, top = 14.dp, right = 4.dp, bottom = 2.dp)
             add<TextView>()
                 .text("QQ Max · 澎湃风格")
@@ -195,7 +195,7 @@ class 设置页 : SettingsActivity() {
                     .text(groupTitle)
                     .textSize(12f)
                     .textColor(M3.onSurfaceVariant)
-                    .typeface(Typeface.DEFAULT_BOLD)
+                    .apply { typeface = Typeface.DEFAULT_BOLD }
                     .padding(left = 6.dp, top = 12.dp, right = 6.dp, bottom = 6.dp)
 
                 val groupCard = add<LinearLayout>()
