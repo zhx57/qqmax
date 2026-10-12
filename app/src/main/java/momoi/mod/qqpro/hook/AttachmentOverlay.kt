@@ -75,22 +75,6 @@ object AttachmentOverlay {
                 isClickable = true
             }
 
-            // MIUIX Drag Handle
-            val handle = View(container.context).apply {
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-                    setColor(0x4D_888888)
-                    cornerRadius = 9999f
-                }
-                val lp = LinearLayout.LayoutParams(36.dp, 4.dp).apply {
-                    gravity = Gravity.CENTER_HORIZONTAL
-                    topMargin = 10.dp
-                    bottomMargin = 2.dp
-                }
-                layoutParams = lp
-            }
-            innerCard.addView(handle)
-
             val inner = FrameLayout(container.context).apply { id = View.generateViewId() }
             innerCard.addView(inner, LinearLayout.LayoutParams(-1, -2))
 
