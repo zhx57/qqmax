@@ -142,19 +142,23 @@ object Translator {
     }
 
     /** Depth-first search for a translation string among common field names. */
-    private fun extractTranslation(any: Any?): String? = when (any) {
-        is JSONObject -> {
-            for (key in listOf("translation", "translatedText", "trans_result", "result", "text", "dst")) {
-                when (val v = any.opt(key)) {
-                    is String -> if (v.isNotBlank()) return v
-                    is JSONObject -> extractTranslation(v)?.let { return it }
-                    is JSONArray -> extractTranslation(v)?.let { return it }
+    private fun extractTranslation(any: Any?): String? {
+        when (any) {
+            is JSONObject -> {
+                for (key in listOf("translation", "translatedText", "trans_result", "result", "text", "dst")) {
+                    when (val v = any.opt(key)) {
+                        is String -> if (v.isNotBlank()) return v
+                        is JSONObject -> extractTranslation(v)?.let { return it }
+                        is JSONArray -> extractTranslation(v)?.let { return it }
+                    }
                 }
+                any.keys().asSequence().mapNotNull { extractTranslation(any.opt(it)) }.firstOrNull()?.let { return it }
             }
-            any.keys().asSequence().mapNotNull { extractTranslation(any.opt(it)) }.firstOrNull()
+            is JSONArray -> {
+                (0 until any.length()).asSequence().mapNotNull { extractTranslation(any.opt(it)) }.firstOrNull()?.let { return it }
+            }
         }
-        is JSONArray -> (0 until any.length()).asSequence().mapNotNull { extractTranslation(any.opt(it)) }.firstOrNull()
-        else -> null
+        return null
     }
 
     /** Strip the region suffix and case: "zh-CN" -> "zh". */
