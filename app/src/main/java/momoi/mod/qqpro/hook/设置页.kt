@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.Dialog
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.ClipDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
@@ -268,17 +269,17 @@ class 设置页 : SettingsActivity() {
 
     private fun categoryIconInfo(title: String): Pair<String, Int> = when {
         title.contains("外观") -> MaterialSymbols.palette to 0xFF_2979FF.toInt()
-        title.contains("Material") || title.contains("MIUIX") -> MaterialSymbols.layers to 0xFF_7C4DFF.toInt()
-        title.contains("菜单") -> MaterialSymbols.menu to 0xFF_00BFA5.toInt()
-        title.contains("输入") -> MaterialSymbols.keyboard to 0xFF_FFAB00.toInt()
+        title.contains("Material") || title.contains("MIUIX") -> MaterialSymbols.star to 0xFF_7C4DFF.toInt()
+        title.contains("菜单") -> MaterialSymbols.drag_handle to 0xFF_00BFA5.toInt()
+        title.contains("输入") -> MaterialSymbols.edit to 0xFF_FFAB00.toInt()
         title.contains("显示") -> MaterialSymbols.image to 0xFF_00C853.toInt()
         title.contains("头像") -> MaterialSymbols.account_circle to 0xFF_0091EA.toInt()
         title.contains("标题栏") -> MaterialSymbols.push_pin to 0xFF_FF6D00.toInt()
-        title.contains("导航") -> MaterialSymbols.navigation to 0xFF_26A69A.toInt()
+        title.contains("导航") -> MaterialSymbols.arrow_downward to 0xFF_26A69A.toInt()
         title.contains("通话") -> MaterialSymbols.call to 0xFF_43A047.toInt()
         title.contains("空间") -> MaterialSymbols.star to 0xFF_FDD835.toInt()
         title.contains("关于") -> MaterialSymbols.info to 0xFF_5C6BC0.toInt()
-        title.contains("调试") -> MaterialSymbols.bug_report to 0xFF_78909C.toInt()
+        title.contains("调试") -> MaterialSymbols.settings to 0xFF_78909C.toInt()
         else -> MaterialSymbols.settings to 0xFF_007DFF.toInt()
     }
 
