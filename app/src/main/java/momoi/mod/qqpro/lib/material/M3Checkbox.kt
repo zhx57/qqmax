@@ -8,29 +8,22 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import momoi.mod.qqpro.lib.dp
-import momoi.mod.qqpro.lib.dpf
 
 /**
- * A self-drawn Material 3 checkbox graphic, used as a [CompoundButton]'s button drawable so the native
- * checkbox keeps all of its selection logic but reads as M3 (no com.google.android.material dependency,
- * which renders wrong at the watch DPI). Colors come from the live [M3] tokens so it follows the theme.
+ * A self-drawn Miuix (HyperOS) checkbox graphic, used as a [CompoundButton]'s button drawable so the
+ * native checkbox keeps all of its selection logic but reads as Miuix (no com.google.android.material
+ * dependency, which renders wrong at the watch DPI). Colors are the upstream Miuix `Checkbox`
+ * Defaults: checked = [M3.primary] circle + white check; unchecked = [M3.secondary] filled circle
+ * (empty); disabled uses the Miuix disabled roles.
  *
- * Three visual states (driven by the host's drawable state):
- *  - unchecked            → thin outlined rounded square
- *  - checked              → filled accent square with a white check
- *  - checked + disabled   → dimmed (38% / locked) accent square — e.g. a member who's force-selected
- *
- * Sized to its bounds (the selector's QUICheckBox is 16dp), so it never clips.
+ * Sized to its bounds (the selector's QUICheckBox is 16dp; Miuix's own checkbox is 26dp), so it
+ * never clips.
  */
 class M3CheckDrawable : Drawable() {
     private var checked = false
     private var enabled = true
     private val rect = RectF()
-    private val radius = 4.dp.toFloat()
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeWidth = 1.6f.dpf
-    }
     private val check = MaterialSymbol(MaterialSymbols.check, M3.onPrimary, insetFraction = 0.2f)
 
     override fun isStateful() = true
@@ -41,7 +34,7 @@ class M3CheckDrawable : Drawable() {
         if (c == checked && e == enabled) return false
         checked = c; enabled = e
         // Recolor the check glyph here (NOT in draw, which would invalidate-loop).
-        check.recolor(if (enabled) M3.onPrimary else dim(M3.onPrimary, 0x99))
+        check.recolor(if (enabled) M3.onPrimary else M3.disabledOnPrimary)
         invalidateSelf()
         return true
     }
@@ -53,21 +46,18 @@ class M3CheckDrawable : Drawable() {
 
     override fun draw(canvas: Canvas) {
         val b = bounds
-        val inset = stroke.strokeWidth / 2f
-        rect.set(b.left + inset, b.top + inset, b.right - inset, b.bottom - inset)
+        rect.set(b)
         if (checked) {
-            // MIUIX circular filled checkbox
-            fill.color = if (enabled) M3.primary else dim(M3.primary, 0x61)
+            // Miuix Checkbox: primary-filled circle with an onPrimary check.
+            fill.color = if (enabled) M3.primary else M3.disabledPrimary
             canvas.drawOval(rect, fill)
             check.draw(canvas)
         } else {
-            // MIUIX circular outline checkbox
-            stroke.color = if (enabled) M3.onSurfaceVariant else dim(M3.onSurfaceVariant, 0x61)
-            canvas.drawOval(rect, stroke)
+            // Miuix Checkbox unchecked: secondary-filled circle (no outline).
+            fill.color = if (enabled) M3.secondary else M3.disabledSecondary
+            canvas.drawOval(rect, fill)
         }
     }
-
-    private fun dim(color: Int, alpha: Int) = (alpha shl 24) or (color and 0xFFFFFF)
 
     override fun setAlpha(alpha: Int) {}
     override fun setColorFilter(colorFilter: ColorFilter?) {}

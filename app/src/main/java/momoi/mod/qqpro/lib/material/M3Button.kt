@@ -7,17 +7,20 @@ import android.widget.TextView
 import momoi.mod.qqpro.lib.dp
 
 /**
- * A Material 3 Expressive button with **spring press-recoil** — on press it scales to 0.96 and on
+ * A Miuix (HyperOS) button with **spring press-recoil** — on press it scales to 0.96 and on
  * release springs back to 1.0 with a slight overshoot (under-damped [SpringAnimator], not a linear
  * tween). Self-contained: no com.google.android.material dependency (the watch theme isn't
  * MaterialComponents-based, so a real Material button would crash).
  *
- * Variants mirror MD3:
- *  - [FILLED]            solid primary, on-primary label (high emphasis)
- *  - [TONAL]             primary container (medium emphasis)
- *  - [TEXT]              no container, accent label (low emphasis)
- *  - [OUTLINED]          outline stroke, accent label
- *  - [ERROR]             translucent error container, error label
+ * Dimensions are the upstream Miuix `Button` Defaults, verbatim: minWidth 58dp, minHeight 40dp,
+ * cornerRadius 16dp, insideMargin 16x13dp, label 17sp ([M3.typeMain]).
+ *
+ * Variants (mapped onto Miuix roles):
+ *  - [FILLED]            primary container + onPrimary label (ButtonDefaults.buttonColorsPrimary)
+ *  - [TONAL]             secondaryVariant + onSecondaryVariant (ButtonDefaults.buttonColors)
+ *  - [TEXT]              no container, primary label (ButtonDefaults.textButtonColorsPrimary)
+ *  - [OUTLINED]          outline stroke, onSecondaryVariant label
+ *  - [ERROR]             error + onError label (destructive)
  *
  * Public on purpose: a @Mixin body referencing it needs it public (else runtime IllegalAccessError).
  */
@@ -31,9 +34,11 @@ class M3Button(ctx: Context) : TextView(ctx) {
     init {
         gravity = Gravity.CENTER
         isSingleLine = true
-        textSize = 14.5f
-        typeface = Typeface.DEFAULT_BOLD
-        setPadding(20.dp, 10.dp, 20.dp, 10.dp)
+        textSize = M3.typeMain
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        minWidth = M3.buttonMinWidth
+        minHeight = M3.buttonMinHeight
+        setPadding(M3.buttonInsetH, M3.buttonInsetV, M3.buttonInsetH, M3.buttonInsetV)
         isClickable = true
         isFocusable = true
         // MIUI Folme-style spring press-recoil: 0.95 on touch down, spring back with lively settle
@@ -67,17 +72,18 @@ class M3Button(ctx: Context) : TextView(ctx) {
     fun variant(v: Variant): M3Button = apply {
         val (container, label) = when (v) {
             Variant.FILLED           -> M3.primary to M3.onPrimary
-            Variant.TONAL            -> M3.primaryContainer to M3.onPrimaryContainer
+            Variant.TONAL            -> M3.secondaryVariant to M3.onSecondaryVariant
             Variant.TEXT             -> 0 to M3.primary
-            Variant.OUTLINED         -> 0 to M3.primary
-            Variant.ERROR            -> ((M3.error and 0x00FFFFFF) or 0x33_000000) to M3.error
+            Variant.OUTLINED         -> 0 to M3.onSecondaryVariant
+            Variant.ERROR            -> M3.error to M3.onColor(M3.error)
         }
         setTextColor(label)
         val base = when (v) {
-            Variant.OUTLINED -> M3.outlined(M3.outline, M3.radiusPill)
-            else -> M3.rounded(container, M3.radiusPill)
+            Variant.OUTLINED -> M3.outlined(M3.outline, M3.radiusLg)
+            Variant.TEXT -> null
+            else -> M3.rounded(container, M3.radiusLg)
         }
-        background = M3.ripple(base)
+        background = if (base == null) null else M3.ripple(base)
     }
 
     override fun setEnabled(enabled: Boolean) {

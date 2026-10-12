@@ -9,12 +9,13 @@ import android.graphics.RectF
 import android.view.View
 import android.widget.Checkable
 import momoi.mod.qqpro.lib.dp
-import momoi.mod.qqpro.lib.dpf
 
 /**
- * A self-drawn Material 3 switch (no com.google.android.material dependency — it crashes at the watch
- * theme/DPI; and the base app's native toggle can't be themed). Pill track + circular thumb, animated,
- * colored from the live [M3] tokens so it follows the user's theme accent. Implements [Checkable].
+ * A self-drawn Miuix (HyperOS) switch. Dimensions and colors are the upstream Miuix
+ * `Switch` Defaults, verbatim: 49x28dp capsule track, 20dp thumb, thumb offset animates
+ * 4dp (off) to 25dp (on); checked track = [M3.primary] + white thumb, unchecked track =
+ * [M3.secondary] + white thumb (Miuix onPrimary = onSecondary = white); disabled tracks
+ * use the Miuix disabled roles. Implements [Checkable] so it can back native toggle rows.
  *
  * Use [setChecked] (with notify=false to seed initial state without firing [onChange]) and set
  * [onChange] for the toggle callback. Public on purpose (referenced from @Mixin bodies).
@@ -33,9 +34,11 @@ class M3Switch(ctx: Context) : View(ctx), Checkable {
     private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
 
-    private val w = 44.dp
-    private val h = 26.dp
-    private val pad = 2.5f.dpf
+    private val w = M3.switchW            // 49dp — Miuix Switch track width
+    private val h = M3.switchH            // 28dp — Miuix Switch track height
+    private val thumb = M3.switchThumb    // 20dp — Miuix Switch thumb size
+    private val offOffset = 4.dp          // Miuix thumb offset when off
+    private val onOffset = 25.dp          // Miuix thumb offset when on
 
     init {
         isClickable = true
@@ -68,7 +71,7 @@ class M3Switch(ctx: Context) : View(ctx), Checkable {
         anim?.cancel()
         if (!isLaidOut) { pos = target; invalidate(); return }
         anim = ValueAnimator.ofFloat(pos, target).apply {
-            duration = 180
+            duration = 200
             interpolator = M3Motion.EasingEmphasized
             addUpdateListener { pos = it.animatedValue as Float; invalidate() }
             start()
@@ -80,19 +83,21 @@ class M3Switch(ctx: Context) : View(ctx), Checkable {
         val cy = paddingTop.toFloat()
         val tw = (width - paddingLeft - paddingRight).toFloat()
         val th = (height - paddingTop - paddingBottom).toFloat()
+        val enabled = isEnabled
 
-        // MIUIX Track: off = soft muted capsule (dark: 0x2E_FFFFFF, light: 0xFF_E3E3E5); on = MIUI primary blue
-        val offTrackColor = if (M3.luminance(M3.surface) > 0.5f) 0xFF_E3E3E5.toInt() else 0x33_FFFFFF
-        trackPaint.color = argb.evaluate(pos, offTrackColor, M3.primary) as Int
+        // Miuix SwitchDefaults: checked track = primary, unchecked track = secondary; the color
+        // blends across the thumb animation. Disabled tracks use the Miuix disabled roles.
+        val onTrack = if (enabled) M3.primary else M3.disabledPrimary
+        val offTrack = if (enabled) M3.secondary else M3.disabledSecondary
+        trackPaint.color = argb.evaluate(pos, offTrack, onTrack) as Int
         rect.set(cx, cy, cx + tw, cy + th)
         val r = th / 2f
         canvas.drawRoundRect(rect, r, r, trackPaint)
 
-        // MIUIX Thumb: pure white circular pill knob across both on/off states
-        val thumbR = th / 2f - pad
-        val travel = tw - th
-        val thumbCx = cx + r + travel * pos
-        thumbPaint.color = 0xFF_FFFFFF.toInt()
-        canvas.drawCircle(thumbCx, cy + r, thumbR, thumbPaint)
+        // Miuix thumb: white in both states (onPrimary = onSecondary = white), riding the
+        // 4dp→25dp left-offset rail (thumb left = offset, so center = offset + thumb/2).
+        val thumbLeft = cx + offOffset + (onOffset - offOffset) * pos
+        thumbPaint.color = if (enabled) M3.onSecondary else M3.disabledOnSurface
+        canvas.drawCircle(thumbLeft + thumb / 2f, cy + r, thumb / 2f, thumbPaint)
     }
 }

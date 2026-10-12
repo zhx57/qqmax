@@ -168,33 +168,36 @@ class 设置页 : SettingsActivity() {
         val root = settingsRoot ?: return
         root.removeAllViews()
         root.content {
-            // MIUIX Standard Large Title
+            // MIUIX Large Title (Miuix TextStyles.Title1 = 32sp)
             add<TextView>()
                 .text("设置")
-                .textSize(26f)
+                .textSize(M3.typeTitle1)
                 .textColor(M3.onSurface)
                 .apply { typeface = Typeface.DEFAULT_BOLD }
                 .padding(left = 4.dp, top = 14.dp, right = 4.dp, bottom = 2.dp)
             add<TextView>()
                 .text("QQ Max · 澎湃风格")
-                .textSize(12f)
+                .textSize(M3.typeFootnote2)
                 .textColor(M3.onSurfaceVariant)
                 .padding(left = 4.dp, top = 0.dp, right = 4.dp, bottom = 12.dp)
 
             // Grouped Categories in MIUIX Cards
             val categories = buildCategories()
             val groups = listOf(
-                "个性与界面" to categories.filter { it.title in listOf("外观主题", "Material 化", "菜单自定义") },
-                "聊天与会话" to categories.filter { it.title in listOf("聊天输入", "聊天显示", "群聊头像", "标题栏与未读", "主页导航") },
-                "扩展与系统" to categories.filter { it.title in listOf("关于与更新", "调试") }
+                "个性与界面" to categories.filter { it.title in listOf("外观主题", "MIUIX 风格", "菜单自定义") },
+                "聊天与会话" to categories.filter { it.title in listOf("聊天输入", "聊天显示", "群聊头像", "标题栏与未读", "聊天总结", "聊天截图", "翻译") },
+                "主页导航" to categories.filter { it.title in listOf("主页导航", "导航与滚动") },
+                "联系人与空间" to categories.filter { it.title in listOf("联系人", "在线状态") },
+                "通知与系统" to categories.filter { it.title in listOf("通知与提醒", "通话", "相机与媒体", "链接") },
+                "扩展" to categories.filter { it.title in listOf("关于与更新", "调试") }
             )
 
             for ((groupTitle, list) in groups) {
                 if (list.isEmpty()) continue
                 add<TextView>()
                     .text(groupTitle)
-                    .textSize(12f)
-                    .textColor(M3.onSurfaceVariant)
+                    .textSize(M3.typeBody2)           // Miuix SmallTitle = subtitle (14sp Bold)
+                    .textColor(M3.onBackgroundVariant) // Miuix SmallTitle color
                     .apply { typeface = Typeface.DEFAULT_BOLD }
                     .padding(left = 6.dp, top = 12.dp, right = 6.dp, bottom = 6.dp)
 
@@ -203,7 +206,7 @@ class 设置页 : SettingsActivity() {
                     .vertical()
                 groupCard.background(GradientDrawable().apply {
                     setColor(M3.surfaceContainer)
-                    cornerRadius = 20.dp.toFloat()
+                    cornerRadius = M3.radiusLg        // Miuix CardDefaults.CornerRadius = 16dp
                 })
                 groupCard.clipToOutline = true
                 groupCard.margin(top = 2.dp, bottom = 8.dp)
@@ -239,13 +242,13 @@ class 设置页 : SettingsActivity() {
                     }
                     val t = TextView(this@设置页).apply {
                         text = cat.title
-                        textSize = 14.5f
-                        typeface = Typeface.DEFAULT_BOLD
+                        textSize = M3.typeHeadline       // Miuix row title (17sp Medium)
+                        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                         setTextColor(M3.onSurface)
                     }
                     val s = TextView(this@设置页).apply {
                         text = cat.subtitle
-                        textSize = 11f
+                        textSize = M3.typeFootnote1      // 13sp summary
                         setTextColor(M3.onSurfaceVariant)
                         visibility = if (cat.subtitle.isEmpty()) View.GONE else View.VISIBLE
                     }
@@ -254,8 +257,8 @@ class 设置页 : SettingsActivity() {
                     row.addView(textCol, LinearLayout.LayoutParams(0, WRAP, 1f))
 
                     val arr = TextView(this@设置页).apply {
-                        setTextColor(M3.onSurfaceVariant)
-                        leadingSymbol(MaterialSymbols.chevron_right, M3.onSurfaceVariant, sizeDp = 18, gap = 0)
+                        setTextColor(M3.onSurfaceTip)
+                        leadingSymbol(MaterialSymbols.chevron_right, M3.onSurfaceTip, sizeDp = 18, gap = 0)
                     }
                     row.addView(arr)
 
@@ -403,6 +406,8 @@ class 设置页 : SettingsActivity() {
             colorPicker("占位文字 Hint", "输入框占位文字", Settings.themeHint, MaterialColors.ON, { M3.hint }, note)
             colorPicker("描边 Outline", "边框/分隔线", Settings.themeOutline, MaterialColors.ON, { M3.outline }, note)
             colorPicker("描边变体 Outline Variant", "次级边框", Settings.themeOutlineVariant, MaterialColors.SURFACE, { M3.outlineVariant }, note)
+            colorPicker("分割线 Divider", "卡片行间细分割线", Settings.themeDivider, MaterialColors.SURFACE, { M3.dividerLine }, note)
+            colorPicker("按钮背景 Secondary", "普通(次级)按钮/开关未选底/输入框背景", Settings.themeSecondary, MaterialColors.SURFACE, { M3.secondaryVariant }, note)
             colorPicker("错误色 Error", "错误/危险操作/未读红标", Settings.themeError, MaterialColors.ERROR, { M3.error }, note)
             actionCard("恢复默认配色", "清除以上所有自定义颜色，恢复内置 MIUIX 官方配色") {
                 Settings.themeTokens.forEach { it.value = "" }
@@ -410,8 +415,8 @@ class 设置页 : SettingsActivity() {
                 showCategoryList()
             }
         },
-        SettingsCategory("MIUIX 风格", "MIUIX / 澎湃视觉重构总开关") {
-            actionCard("界面风格", "在 MIUIX 与 原始 设计之间一键切换(选择后自动重启)") {
+        SettingsCategory("MIUIX 风格", "MIUIX 视觉重构总开关（关闭则保留原生界面）") {
+            actionCard("界面风格", "在 MIUIX 与 原始 设计之间手动切换(选择后自动重启，不再首次启动时自动弹出)") {
                 startActivity(Intent(this@设置页, StyleChooserActivity::class.java))
             }
             switch("MIUIX 聊天界面", "聊天输入框、回复/编辑横幅应用 MIUIX 风格(大圆角胶囊输入框、纯白滑块开关、澎湃科技蓝发送键)；关闭则保留原样。需开启“聊天页直接输入”，重进聊天页生效", Settings.materializeChat)
@@ -452,7 +457,7 @@ class 设置页 : SettingsActivity() {
             switch("输入键居中", "在聊天页面将输入键居中放置", Settings.swapCenterKeyboard)
             switch("隐藏语音按钮", "在聊天页隐藏语音(麦克风)按钮，所有输入模式下均生效", Settings.hideVoiceButton)
             switch("全员禁言隐藏输入栏", "群全员禁言且自己非群主/管理员时，隐藏底部输入栏，改为显示“全员禁言中”提示", Settings.muteHideInputBar)
-            switch("群全员禁言开关", "在群聊设置中为群主/管理员显示「全员禁言」开关，可查看并切换当前禁言状态（需开启 Material 设置）", Settings.groupWholeMute)
+            switch("群全员禁言开关", "在群聊设置中为群主/管理员显示「全员禁言」开关，可查看并切换当前禁言状态（需开启「MIUIX 设置页面」）", Settings.groupWholeMute)
             switch("图片随消息发送", "发送文字时一并发送已选图片", Settings.sendWithImage)
             switch("回复带艾特", "回复消息时自动艾特对方", Settings.replyWithAt)
             switch("气泡 +1 按钮", "最新一条与上一条内容相同时，在气泡上显示「+1」小按钮，点按可再次发送该内容；关闭则不显示", Settings.plusOneButton)
@@ -561,7 +566,7 @@ class 设置页 : SettingsActivity() {
             }
             switch("蓝牙耳机路由", "通话音频自动路由到已连接的蓝牙耳机(SCO/通信设备)，并在通话界面显示输出切换(蓝牙/扬声器/听筒)；关闭则保留 QQ 仅扬声器/听筒的路由", Settings.callBluetoothRoute)
             switch("无摄像头也可视频通话", "没有摄像头的手表也能发起视频通话(至少看到对方)。QQ 会以「当前设备不支持」在两处拦截，开启后绕过并发起只收不发的视频通话(隐藏本地摄像头控制)", Settings.callCameralessVideo)
-            switch("全新通话界面", "把来电与通话中界面重做为全新的 Material 3 界面(内嵌原生视频画面，沿用 QQ 的通话服务/流程)；关闭则保留原生通话界面。默认关闭，重进通话生效", Settings.materializeCall)
+            switch("全新通话界面", "把来电与通话中界面重做为全新的 MIUIX 界面(内嵌原生视频画面，沿用 QQ 的通话服务/流程)；关闭则保留原生通话界面。默认关闭，重进通话生效", Settings.materializeCall)
         },
         SettingsCategory("联系人", "联系人页面") {
             switch("联系人分组", "联系人页用「好友」「群聊」标题分组，通知拆成好友/群两项各带数量，去掉群行末尾图标", Settings.contactSections)

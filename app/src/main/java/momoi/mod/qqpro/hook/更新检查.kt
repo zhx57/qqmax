@@ -1,12 +1,10 @@
 package momoi.mod.qqpro.hook
 
-import android.content.Intent
 import android.os.Bundle
 import com.tencent.mobileqq.app.PrivacyPolicyHelper
 import com.tencent.qqnt.watch.mainframe.MainActivity
 import momoi.anno.mixin.Mixin
 import momoi.mod.qqpro.Settings
-import momoi.mod.qqpro.StyleChooserActivity
 import momoi.mod.qqpro.ota.OTAManager2
 import momoi.mod.qqpro.util.Utils
 import momoi.mod.qqpro.watchdog.Watchdog
@@ -37,10 +35,12 @@ class 更新检查 : MainActivity() {
         // until granted. Ask on launch (no-op below API 33 / once already granted).
         NotificationPermission.ensure(this)
         OTAManager2(this).checkUpdate(false)
-        // First launch (never picked a UI style): show the Material-vs-original chooser on top.
-        if (!Settings.styleChooserSeen.value) {
-            runCatching { startActivity(Intent(this, StyleChooserActivity::class.java)) }
-                .onFailure { Utils.log("StyleChooser: launch on start failed: $it") }
+        // MIUIX is the only design system now. If a previous version's style chooser was used to pick
+        // "原始设计" (which one-shot turned ALL the MIUIX switches off and persisted it), re-enable every
+        // MIUIX toggle once so the redesign actually applies. The chooser stays reachable from Settings.
+        if (Settings.uiStyle.value == 2) {
+            Settings.uiStyle.value = 1
+            runCatching { Settings.applyUiStyle(true) }
         }
     }
 }

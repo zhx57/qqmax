@@ -17,31 +17,34 @@ import android.widget.TextView
 import momoi.mod.qqpro.lib.dp
 
 /**
- * Reusable Material 3 (dark) building blocks for QQPro's Kotlin-DSL UI (the project uses no XML).
+ * Miuix (HyperOS / 澎湃OS) design tokens for QQMax's Kotlin-DSL UI (the project uses no XML).
  *
- * Centralized here — not inlined per feature — so every redesigned screen shares one palette and one
- * set of widgets ([MaterialIconButton], [searchField], [M3Button], [M3Card], [M3ListItem], [M3Dialog]).
- * The palette mirrors [momoi.mod.qqpro.hook.MainNav] so the home nav and any new bars read as one system.
+ * Every value below is taken verbatim from the upstream Miuix design system (compose-miuix-ui,
+ * stable v0.9.4): `theme/Colors.kt` (lightColorScheme/darkColorScheme), `theme/TextStyles.kt`
+ * (type scale), and the component Defaults (Card 16dp radius, Button 58x40/16dp, Switch 49x28
+ * track + 20dp thumb, Checkbox 26dp, BasicComponent 56dp min height / 16dp inset, Dialog 32dp
+ * radius / 24dp inset, SmallTitle 28x8 padding). DO NOT invent values — when a token is missing,
+ * look it up in the Miuix sources instead of guessing.
  *
- * This is the SINGLE SOURCE OF TRUTH for app colors: the legacy [momoi.mod.qqpro.Colors] object now
- * aliases these tokens, so retheming = editing the token values here. Tokens are named by MD3 role.
- * All classes are public on purpose (a @Mixin body that references a helper needs it public, or it hits
- * IllegalAccessError at runtime).
+ * Centralized here — not inlined per feature — so every screen shares one palette and one set of
+ * widgets. This is the SINGLE SOURCE OF TRUTH for app colors: the legacy [momoi.mod.qqpro.Colors]
+ * object aliases these tokens, so retheming = editing the token values here. Tokens are named by
+ * Miuix role. All classes are public on purpose (a @Mixin body that references a helper needs it
+ * public, or it hits IllegalAccessError at runtime).
  */
 object M3 {
     // ── Color tokens (all user-overridable) ──────────────────────────────────────
-    // Every MD3 role below resolves LIVE from its own Settings color pref (a hex string). A blank
-    // pref falls back to the built-in default (and for the primary-derived tokens, to the value
-    // auto-derived from the accent). Editing a token in the 外观主题 settings category rethemes every
-    // materialized screen the next time it's built. The single source of truth is here.
+    // Every role below resolves LIVE from its own Settings color pref (a hex string). A blank
+    // pref falls back to the built-in default (and for system-derived tokens, to the Material You
+    // value when 跟随系统主题色 is on). The single source of truth is here.
     // Whether to use the light baseline palette instead of the dark one (Settings.lightMode). Drives
-    // each token's DEFAULT below; an explicit per-token 外观主题 override still wins when set.
+    // each token's DEFAULT below; an explicit 外观主题 override still wins when set.
     private val light get() = momoi.mod.qqpro.Settings.lightMode.value
     /** Pick the dark- or light-mode baseline default for the current [light] mode. */
     private fun dl(darkValue: Int, lightValue: Int) = if (light) lightValue else darkValue
 
     // ── System (Material You) color resolution ───────────────────────────────────
-    // The MD3 roles a system-color palette can supply. Each token below resolves via [tok]/[sys]:
+    // The roles a system-color palette can supply. Each token below resolves via [tok]/[sys]:
     // an explicit 外观主题 override wins; else the system value (when 跟随系统主题色 is on and the
     // device exposes Material You); else the built-in default.
     enum class SysRole {
@@ -94,7 +97,7 @@ object M3 {
             else blend(base, 0xFF_000000.toInt(), -amount)
         }
 
-        /** Map an MD3 [role] onto the system tonal palette for the current light/dark mode. */
+        /** Map a [role] onto the system tonal palette for the current light/dark mode. */
         fun color(role: SysRole): Int? {
             if (!available) return null
             val dark = !light
@@ -117,50 +120,96 @@ object M3 {
         }
     }
 
-    // Accent (primary). Dark = MIUI Night Blue (3388FF, high contrast); Light = MIUI Classic Blue (007DFF).
-    val DEFAULT_PRIMARY get() = dl(0xFF_3388FF.toInt(), 0xFF_007DFF.toInt())
+    // Accent (primary). Miuix lightColorScheme/darkColorScheme: #3482FF (light) / #277AF7 (dark).
+    val DEFAULT_PRIMARY get() = dl(0xFF_277AF7.toInt(), 0xFF_3482FF.toInt())
 
     val primary: Int get() = tok(momoi.mod.qqpro.Settings.themeColor.value, SysRole.PRIMARY, DEFAULT_PRIMARY)
+    val primaryVariant: Int get() = dl(0xFF_0073DD.toInt(), 0xFF_3482FF.toInt())
     /**
-     * Label/icon color on a filled primary surface. Blank pref = auto: white on a normal accent (the
-     * right look for a dark UI); only a very LIGHT accent (e.g. pale yellow) flips to a dark tone for
+     * Label/icon color on a filled primary surface (Miuix onPrimary = white in both modes). A blank
+     * pref resolves to white; only a very LIGHT accent (e.g. pale yellow) flips to a dark tone for
      * contrast. Avoids the near-black text a blanket darken() produced on mid-bright accents.
      */
     val onPrimary: Int get() = parseColorOrNull(momoi.mod.qqpro.Settings.themeOnPrimary.value)
         ?: sys(SysRole.ON_PRIMARY)
         ?: if (luminance(primary) > 0.72f) darken(primary, 0.78f) else 0xFF_FFFFFF.toInt()
-    /** Translucent tonal container; blank pref = the system tonal (opaque) or auto (accent at 0x33). */
+    /** Miuix primaryContainer: #5D9BFF (light) / #338FE4 (dark) — opaque accent container. */
     val primaryContainer: Int get() = parseColorOrNull(momoi.mod.qqpro.Settings.themePrimaryContainer.value)
         ?: sys(SysRole.PRIMARY_CONTAINER)
-        ?: ((primary and 0x00FFFFFF) or 0x26_000000)
+        ?: dl(0xFF_338FE4.toInt(), 0xFF_5D9BFF.toInt())
+    /** Miuix onPrimaryContainer: white in both modes. */
     val onPrimaryContainer: Int get() = parseColorOrNull(momoi.mod.qqpro.Settings.themeOnPrimaryContainer.value)
         ?: sys(SysRole.ON_PRIMARY_CONTAINER)
-        ?: primary
+        ?: 0xFF_FFFFFF.toInt()
     /**
-     * OPAQUE version of [primaryContainer] (which is translucent). Use where the fill is rasterized
-     * with no live background behind it — e.g. an avatar/icon drawable — so the translucent tonal
-     * doesn't composite over black and turn dark in light mode. Composited over [surface].
+     * OPAQUE version of [primaryContainer] (which is opaque itself in Miuix). Use where a fill is
+     * rasterized with no live background behind it — e.g. an avatar/icon drawable.
      */
     val tonalSolid: Int get() = compositeOver(primaryContainer, surface)
 
-    // ── Surfaces (MIUIX palette: pure black / calm grey background + high contrast cards) ───────
-    val surface: Int get() = tok(momoi.mod.qqpro.Settings.themeSurface.value, SysRole.SURFACE, dl(0xFF_000000.toInt(), 0xFF_F6F6F8.toInt()))              // screen background
-    val surfaceContainer: Int get() = tok(momoi.mod.qqpro.Settings.themeSurfaceContainer.value, SysRole.SURFACE_CONTAINER, dl(0xFF_1F1F1F.toInt(), 0xFF_FFFFFF.toInt()))     // MIUI card container
-    val surfaceContainerHigh: Int get() = tok(momoi.mod.qqpro.Settings.themeSurfaceContainerHigh.value, SysRole.SURFACE_CONTAINER_HIGH, dl(0xFF_292929.toInt(), 0xFF_EEEEF0.toInt())) // raised card / row pressed
-    val surfaceVariant: Int get() = tok(momoi.mod.qqpro.Settings.themeSurfaceVariant.value, SysRole.SURFACE_VARIANT, dl(0xFF_262626.toInt(), 0xFF_E6E6E8.toInt()))
+    // ── Secondary control family (Miuix Switch/Checkbox/Button off-state + normal button) ──
+    /** Miuix secondary: #E6E6E6 (light) / #505050 (dark) — unchecked switch track, unchecked checkbox fill. */
+    val secondary: Int get() = dl(0xFF_505050.toInt(), 0xFF_E6E6E6.toInt())
+    /** Miuix onSecondary: white — the unchecked switch THUMB sits on [secondary]. */
+    val onSecondary: Int get() = 0xFF_FFFFFF.toInt()
+    /** Miuix secondaryVariant: #F0F0F0 (light) / #434343 (dark) — normal button / raised fill. */
+    val secondaryVariant: Int get() = parseColorOrNull(momoi.mod.qqpro.Settings.themeSecondary.value)
+        ?: dl(0xFF_434343.toInt(), 0xFF_F0F0F0.toInt())
+    /** Miuix onSecondaryVariant: #303030 (light) / #D9D9D9 (dark) — normal button label. */
+    val onSecondaryVariant: Int get() = dl(0xFF_D9D9D9.toInt(), 0xFF_303030.toInt())
+    /** Miuix secondaryContainer: #F0F0F0 (light) / #434343 (dark) — TextField input fill. */
+    val inputFill: Int get() = dl(0xFF_434343.toInt(), 0xFF_F0F0F0.toInt())
+    /** Miuix onSecondaryContainer: #A9A9A9 (light) / #7C7C7C (dark) — input label/hint. */
+    val onInputFill: Int get() = dl(0xFF_7C7C7C.toInt(), 0xFF_A9A9A9.toInt())
+    /** Miuix tertiaryContainer: #EAF2FF (light) / #2B3B54 (dark) — dropdown selected container. */
+    val tertiaryContainer: Int get() = dl(0xFF_2B3B54.toInt(), 0xFF_EAF2FF.toInt())
+    /** Miuix onTertiaryContainer: #3482FF (light) / #4788FF (dark) — dropdown selected content. */
+    val onTertiaryContainer: Int get() = dl(0xFF_4788FF.toInt(), 0xFF_3482FF.toInt())
 
-    // ── Content (MIUIX typography tones) ───────────────────────
-    val onSurface: Int get() = tok(momoi.mod.qqpro.Settings.themeOnSurface.value, SysRole.ON_SURFACE, dl(0xFF_FFFFFF.toInt(), 0xFF_111111.toInt()))
-    val onSurfaceVariant: Int get() = tok(momoi.mod.qqpro.Settings.themeOnSurfaceVariant.value, SysRole.ON_SURFACE_VARIANT, dl(0x99_FFFFFF.toInt(), 0x80_000000.toInt()))     // 60% white / 50% black
-    val onSurfaceTip: Int get() = tok(momoi.mod.qqpro.Settings.themeOnSurfaceTip.value, SysRole.ON_SURFACE_TIP, dl(0x66_FFFFFF.toInt(), 0x4D_000000.toInt()))         // 40% white / 30% black
-    val hint: Int get() = tok(momoi.mod.qqpro.Settings.themeHint.value, SysRole.HINT, dl(0x66_FFFFFF.toInt(), 0x4D_000000.toInt()))
-    val outline: Int get() = tok(momoi.mod.qqpro.Settings.themeOutline.value, SysRole.OUTLINE, dl(0x1F_FFFFFF.toInt(), 0x14_000000.toInt()))
-    val outlineVariant: Int get() = tok(momoi.mod.qqpro.Settings.themeOutlineVariant.value, SysRole.OUTLINE_VARIANT, dl(0x14_FFFFFF.toInt(), 0x0F_000000.toInt()))
+    // ── Surfaces (Miuix background/surface/surfaceContainer semantics) ──────────
+    // Miuix: background = page canvas (white / #242424); surface = plain surface & floats
+    // (#F7F7F7 / black); surfaceContainer = Card fill (white / #242424). In this app [surface] is
+    // the page canvas, so it maps to Miuix `background`; cards use [surfaceContainer].
+    val surface: Int get() = tok(momoi.mod.qqpro.Settings.themeSurface.value, SysRole.SURFACE, dl(0xFF_242424.toInt(), 0xFF_FFFFFF.toInt()))          // page canvas (Miuix background)
+    val surfaceFloat: Int get() = dl(0xFF_000000.toInt(), 0xFF_F7F7F7.toInt())        // bars / simple floats (Miuix surface)
+    val surfaceContainer: Int get() = tok(momoi.mod.qqpro.Settings.themeSurfaceContainer.value, SysRole.SURFACE_CONTAINER, dl(0xFF_242424.toInt(), 0xFF_FFFFFF.toInt()))     // card container
+    val surfaceContainerHigh: Int get() = tok(momoi.mod.qqpro.Settings.themeSurfaceContainerHigh.value, SysRole.SURFACE_CONTAINER_HIGH, dl(0xFF_434343.toInt(), 0xFF_F0F0F0.toInt())) // raised card / secondary button fill
+    val surfaceContainerHighest: Int get() = dl(0xFF_2D2D2D.toInt(), 0xFF_E8E8E8.toInt())
+    val surfaceVariant: Int get() = tok(momoi.mod.qqpro.Settings.themeSurfaceVariant.value, SysRole.SURFACE_VARIANT, dl(0xFF_242424.toInt(), 0xFF_FFFFFF.toInt()))
 
-    // ── Status (MIUI alert red) ──────────────────────────────────────────────────
-    val error: Int get() = parseColor(momoi.mod.qqpro.Settings.themeError.value, dl(0xFF_FF4D4F.toInt(), 0xFF_F04438.toInt()))
-    val badge: Int get() = error                   // unread/notification badge follows the error token
-    val legacyBtn = 0xFF_007DFF.toInt()            // MIUI link/button blue (Colors.btn)
+    // ── Content (Miuix typography tones) ───────────────────────
+    val onSurface: Int get() = tok(momoi.mod.qqpro.Settings.themeOnSurface.value, SysRole.ON_SURFACE, dl(0xFF_F2F2F2.toInt(), 0xFF_000000.toInt()))
+    /** Miuix onSurfaceVariantSummary: #99000000 (light) / #80FFFFFF (dark) — row summaries. */
+    val onSurfaceVariant: Int get() = tok(momoi.mod.qqpro.Settings.themeOnSurfaceVariant.value, SysRole.ON_SURFACE_VARIANT, dl(0x80_FFFFFF.toInt(), 0x99_000000.toInt()))
+    /** Miuix onSurfaceVariantActions: #66000000 (light) / #66FFFFFF (dark) — arrows/secondary actions. */
+    val onSurfaceTip: Int get() = tok(momoi.mod.qqpro.Settings.themeOnSurfaceTip.value, SysRole.ON_SURFACE_TIP, dl(0x66_FFFFFF.toInt(), 0x66_000000.toInt()))
+    val hint: Int get() = tok(momoi.mod.qqpro.Settings.themeHint.value, SysRole.HINT, dl(0x66_FFFFFF.toInt(), 0x66_000000.toInt()))
+    /** Miuix onBackgroundVariant: #8C93B0 (light) / #787E96 (dark) — SmallTitle group labels. */
+    val onBackgroundVariant: Int get() = dl(0xFF_787E96.toInt(), 0xFF_8C93B0.toInt())
+    /** Miuix onSurfaceSecondary: #CC000000 (light) / #CCFFFFFF (dark) — dialog summaries. */
+    val onSurfaceSecondary: Int get() = dl(0xCC_FFFFFF.toInt(), 0xCC_000000.toInt())
+    /** Miuix outline: #D9D9D9 (light) / #404040 (dark) — borders. */
+    val outline: Int get() = tok(momoi.mod.qqpro.Settings.themeOutline.value, SysRole.OUTLINE, dl(0xFF_404040.toInt(), 0xFF_D9D9D9.toInt()))
+    val outlineVariant: Int get() = tok(momoi.mod.qqpro.Settings.themeOutlineVariant.value, SysRole.OUTLINE_VARIANT, dl(0xFF_393939.toInt(), 0xFF_E0E0E0.toInt()))
+    /** Miuix dividerLine: #E0E0E0 (light) / #393939 (dark) — hairline dividers. */
+    val dividerLine: Int get() = parseColorOrNull(momoi.mod.qqpro.Settings.themeDivider.value)
+        ?: dl(0xFF_393939.toInt(), 0xFF_E0E0E0.toInt())
+
+    // ── Status (Miuix error role) ────────────────────────────────────────────────
+    val error: Int get() = parseColor(momoi.mod.qqpro.Settings.themeError.value, dl(0xFF_F12522.toInt(), 0xFF_E94634.toInt()))
+    val badge: Int get() = error                   // unread/notification badge follows the error token (Miuix BadgeDefaults)
+    val legacyBtn get() = primary                  // Colors.btn now = the Miuix accent
+
+    // ── Dimming / slider ─────────────────────────────────────────────────────────
+    /** Miuix windowDimming: black 30% (light) / 60% (dark) — dialog/popup scrim. */
+    val windowDimming: Int get() = dl(0x99_000000.toInt(), 0x4D_000000.toInt())
+    /** Miuix sliderBackground: #0F000000 (light) / #26FFFFFF (dark) — slider track. */
+    val sliderBackground: Int get() = dl(0x26_FFFFFF.toInt(), 0x0F_000000.toInt())
+
+    // ── Disabled (Miuix disabled roles) ─────────────────────────────────────────
+    val disabledPrimary: Int get() = dl(0xFF_253E64.toInt(), 0xFF_C2D9FF.toInt())
+    val disabledSecondary: Int get() = dl(0xFF_3F3F3F.toInt(), 0xFF_F0F0F0.toInt())
+    val disabledOnSurface: Int get() = dl(0xFF_666666.toInt(), 0xFF_B2B2B2.toInt())
 
     // ── Chat tokens (referenced by Colors aliases; values must stay exact) ───────
     val replyText = 0xFF_DDDDDD.toInt()
@@ -169,19 +218,53 @@ object M3 {
 
     // Group role/level tag badges (头衔/普通/管理/群主). Mode-aware: the dark values are unchanged; light
     // mode uses a pale tint background with a deeper, readable text color so the tags don't show as dark
-    // chips on a light bubble. (Nested object can use M3's private [dl].)
+    // chips on a light bubble.
     object NickTag {
         val specialBg get() = dl(0xFF_30263F.toInt(), 0xFF_ECE3FB.toInt()); val specialText get() = dl(0xFF_BB87F7.toInt(), 0xFF_6A3FD0.toInt())
         val normalBg  get() = dl(0xFF_2E2E2E.toInt(), 0xFF_E4E4E4.toInt()); val normalText  get() = dl(0xFF_9E9E9E.toInt(), 0xFF_5F5F5F.toInt())
-        val adminBg   get() = dl(0xFF_0E2D41.toInt(), 0xFF_D6E9FB.toInt()); val adminText   get() = dl(0xFF_0088EE.toInt(), 0xFF_0066CC.toInt())
-        val ownerBg   get() = dl(0xFF_412917.toInt(), 0xFF_FCE6D2.toInt()); val ownerText   get() = dl(0xFF_FF8D40.toInt(), 0xFF_C25700.toInt())
+        val adminBg   get() = dl(0xFF_0E2D41.toInt(), 0xFF_D6E9FB.toInt()); val adminText  get() = dl(0xFF_0088EE.toInt(), 0xFF_0066CC.toInt())
+        val ownerBg   get() = dl(0xFF_412917.toInt(), 0xFF_FCE6D2.toInt()); val ownerText  get() = dl(0xFF_FF8D40.toInt(), 0xFF_C25700.toInt())
     }
 
-    // ── Shape / dimens (MIUIX squircle continuous rounded corners) ───────────────
+    // ── Shape (Miuix component Defaults) ─────────────────────────────────────────
+    // CardDefaults.CornerRadius = 16dp; ButtonDefaults.CornerRadius = 16dp; DialogDefaults.
+    // CornerRadius = 32dp. Small shapes (8/14dp) follow the same family for chips/fields.
     val radiusSm get() = 8.dp.toFloat()
     val radiusMd get() = 14.dp.toFloat()
-    val radiusLg get() = 20.dp.toFloat() // 20dp smooth card corner
+    val radiusLg get() = 16.dp.toFloat()      // Miuix Card / Button radius
+    val radiusXl get() = 24.dp.toFloat()
+    val radiusDialog get() = 32.dp.toFloat()  // Miuix DialogDefaults.CornerRadius
     val radiusPill = 9999f
+
+    // ── Component dimens (Miuix Defaults, verbatim) ─────────────────────────────
+    val cardRadius = 16.dp                    // CardDefaults.CornerRadius
+    val buttonMinWidth = 58.dp                // ButtonDefaults.MinWidth
+    val buttonMinHeight = 40.dp               // ButtonDefaults.MinHeight
+    val buttonInsetH = 16.dp                  // ButtonDefaults.InsideMargin horizontal
+    val buttonInsetV = 13.dp                  // ButtonDefaults.InsideMargin vertical
+    val switchW = 49.dp                       // Switch track width
+    val switchH = 28.dp                       // Switch track height
+    val switchThumb = 20.dp                   // Switch thumb size
+    val checkboxSize = 26.dp                  // CheckboxDefaults size
+    val rowMinHeight = 56.dp                  // BasicComponentDefaults min height
+    val rowInset = 16.dp                      // BasicComponentDefaults.InsideMargin
+    val smallTitlePadH = 28.dp                // SmallTitleDefaults.InsideMargin horizontal
+    val smallTitlePadV = 8.dp                 // SmallTitleDefaults.InsideMargin vertical
+    val searchMinHeight = 45.dp               // SearchBarDefaults.InputFieldMinHeight
+    val dialogInset = 24.dp                   // DialogDefaults.insideMargin
+    val dialogOuterMargin = 12.dp             // DialogDefaults.outsideMargin
+
+    // ── Type scale (Miuix TextStyles, verbatim sp sizes) ────────────────────────
+    val typeTitle1 = 32f     // page hero titles
+    val typeTitle2 = 24f
+    val typeTitle3 = 20f
+    val typeTitle4 = 18f
+    val typeHeadline = 17f   // row titles (BasicComponent: 17sp, Medium weight)
+    val typeMain = 17f       // main / paragraph / button / headline1
+    val typeBody1 = 16f
+    val typeBody2 = 14f      // summaries / subtitle (subtitle = 14sp Bold)
+    val typeFootnote1 = 13f
+    val typeFootnote2 = 11f
 
     // ── Deprecated aliases (kept so existing call sites keep compiling) ──────────
     val ACCENT get() = primary
@@ -208,10 +291,7 @@ object M3 {
 
     /**
      * Best-contrast label color (near-black or white) for content drawn ON a filled [bg] of an
-     * arbitrary color. Use for any button/badge whose background isn't a fixed token — e.g. the
-     * accent (which is now a light tone by default), error red, or a status color — so the label
-     * stays legible regardless of theme. (For a background that is exactly [primary], [onPrimary] is
-     * the equivalent purpose-built token.)
+     * arbitrary color. Use for any button/badge whose background isn't a fixed token.
      */
     fun onColor(bg: Int): Int = if (luminance(bg) > 0.6f) 0xFF_111111.toInt() else 0xFF_FFFFFF.toInt()
 
@@ -223,7 +303,6 @@ object M3 {
         return 0.299f * r + 0.587f * g + 0.114f * b
     }
 
-    /** Blend a color toward black by [amount] (0 = unchanged, 1 = black); alpha preserved. */
     /** Composite a (possibly translucent) [fg] over an opaque [bg], returning an opaque color. */
     fun compositeOver(fg: Int, bg: Int): Int {
         val a = (fg ushr 24 and 0xFF) / 255f
@@ -261,8 +340,7 @@ object M3 {
             setStroke(strokeWidthDp.dp, strokeColor)
         }
 
-    /** A rounded rect that is BOTH filled ([fillColor]) and outlined ([strokeColor]) — a filled field
-     *  with a visible border (e.g. the materialized chat input). */
+    /** A rounded rect that is BOTH filled ([fillColor]) and outlined ([strokeColor]). */
     fun filledOutlined(
         fillColor: Int, strokeColor: Int, radius: Float = radiusMd, strokeWidthDp: Int = 1,
     ): GradientDrawable = GradientDrawable().apply {
@@ -272,7 +350,7 @@ object M3 {
     }
 
     /**
-     * Wrap a content drawable with an MIUIX ripple (pressed feedback). The mask BOUNDS the ripple.
+     * Wrap a content drawable with a MIUIX ripple (pressed feedback). The mask BOUNDS the ripple.
      */
     fun ripple(content: Drawable?, rippleColor: Int = dl(0x1F_FFFFFF, 0x12_000000)): RippleDrawable =
         RippleDrawable(ColorStateList.valueOf(rippleColor), content, content ?: ColorDrawable(Color.WHITE))
@@ -309,20 +387,21 @@ object M3 {
         }
     }
 
-    /** A rounded, sunken M3 search/text field. */
+    /** A MIUIX search/text field pill (Miuix InputField: 45dp min height, round fill). */
     fun searchField(ctx: Context, hint: String): EditText = EditText(ctx).apply {
         this.hint = hint
-        setHintTextColor(M3.hint)
+        setHintTextColor(onInputFill)
         setTextColor(onSurface)
-        textSize = 13f
+        textSize = typeFootnote1
         setSingleLine()
-        setPadding(12.dp, 6.dp, 12.dp, 6.dp)
-        background = rounded(surfaceContainer, radiusMd)
+        setPadding(16.dp, 0, 16.dp, 0)
+        minHeight = searchMinHeight
+        background = rounded(surfaceContainerHigh, radiusPill)
     }
 }
 
 /**
- * A circular tonal Material icon button with an optional top-end unread badge. Self-contained
+ * A circular tonal icon button with an optional top-end unread badge. Self-contained
  * (no XML, no Material lib dependency — the watch theme isn't MaterialComponents-based, so a real
  * com.google.android.material button would crash). Reuse for any toolbar/action-bar action.
  */
@@ -356,16 +435,18 @@ class MaterialIconButton(ctx: Context) : FrameLayout(ctx) {
 
     /** Set the icon from a resource name (app resources aren't on the compile-time R). */
     fun setIconResName(name: String) {
+        val context = context
+        val resources = context.resources
         val id = resources.getIdentifier(name, "drawable", context.packageName)
         if (id != 0) runCatching { icon.setImageResource(id) }
     }
 
-    /** Set the icon from a drawable (e.g. a self-drawn [MaterialIcon]). */
+    /** Set the icon from a drawable (e.g. a self-drawn icon). */
     fun setIcon(drawable: android.graphics.drawable.Drawable) = icon.setImageDrawable(drawable)
 
     fun setIconTint(color: Int) = icon.setColorFilter(color)
 
-    /** Enable the M3 tonal circular container behind the icon (for monochrome/line icons). */
+    /** Enable the accent-tile circular container behind the icon (for monochrome/line icons). */
     fun setTonalContainer() {
         background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(M3.TONAL) }
     }

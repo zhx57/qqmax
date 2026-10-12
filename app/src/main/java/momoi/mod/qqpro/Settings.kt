@@ -44,6 +44,9 @@ object Settings {
     val themeOutline = StringPref("themeOutline", "")
     val themeOutlineVariant = StringPref("themeOutlineVariant", "")
     val themeError = StringPref("themeError", "")
+    // Extra Miuix tokens surfaced as overrides (blank = built-in Miuix default; read live by M3).
+    val themeDivider = StringPref("themeDivider", "")
+    val themeSecondary = StringPref("themeSecondary", "")
     // Light vs dark baseline palette. false (default) = the dark M3 palette the app has always used;
     // true = a light M3 baseline (recommended neutral light surfaces + a deeper blue accent). Read live
     // by the M3 object: it picks each token's default by this flag, while per-token 外观主题 overrides
@@ -61,6 +64,7 @@ object Settings {
         themeSurface, themeSurfaceContainer, themeSurfaceContainerHigh, themeSurfaceVariant,
         themeOnSurface, themeOnSurfaceVariant, themeOnSurfaceTip, themeHint,
         themeOutline, themeOutlineVariant, themeError,
+        themeDivider, themeSecondary,
     )
     val showGroupAvatar = BooleanPref("showGroupAvatar", true)
     // Also show avatar + two-line nick header for your own messages, like others.
