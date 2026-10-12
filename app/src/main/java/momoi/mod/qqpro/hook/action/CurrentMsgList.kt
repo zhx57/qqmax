@@ -368,6 +368,15 @@ object CurrentMsgList {
             for (item in list) {
                 val j = indexById[item.d.msgId]
                 if (j != null && j >= mi) {
+                    // Anti-recall: a recall arrives as an update of the ORIGINAL record with
+                    // recallTime > 0 (the kernel marks it recalled in place). Skip that update so
+                    // the mirror keeps the pre-recall message content — the row never turns into a
+                    // gray tip and never vanishes. First-seen records with recallTime > 0 (e.g.
+                    // opening a chat whose history already contains an old recall) still load.
+                    if (momoi.mod.qqpro.Settings.antiRecall.value && item.d.recallTime > 0L) {
+                        Utils.log("MsgList.n: antiRecall kept original of recalled msgId=${item.d.msgId}")
+                        continue
+                    }
                     while (mi < j) { merged.add(msg[mi]); mi++ }   // mirror-only items before it
                     merged.add(item)                               // updated in place
                     mi = j + 1
