@@ -669,13 +669,14 @@ class 设置页 : SettingsActivity() {
     private fun GroupScopeFix.section(title: String, subtitle: String) {
         add<TextView>()
             .text(title)
-            .textSize(15f)
-            .textColor(ACCENT)
+            .textSize(M3.typeBody2)               // Miuix SmallTitle: 14sp Bold
+            .textColor(M3.onBackgroundVariant)    // Miuix SmallTitle color (not the accent)
+            .apply { typeface = Typeface.DEFAULT_BOLD }
             .padding(left = 4.dp, top = 14.dp, right = 4.dp, bottom = 0.dp)
         add<TextView>()
             .text(subtitle)
-            .textSize(10f)
-            .textColor(M3.hint)
+            .textSize(M3.typeFootnote1)
+            .textColor(M3.onSurfaceVariant)
             .padding(left = 4.dp, top = 0.dp, right = 4.dp, bottom = 6.dp)
     }
 
@@ -1306,13 +1307,13 @@ class 设置页 : SettingsActivity() {
         column.content {
             add<TextView>()
                 .text(title)
-                .textSize(14.5f)
+                .textSize(M3.typeHeadline)        // Miuix row title: 17sp Medium
                 .textColor(M3.onSurface)
-                .apply { typeface = Typeface.DEFAULT_BOLD }
+                .apply { typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) }
             if (desc.isNotEmpty()) {
                 add<TextView>()
                     .text(desc)
-                    .textSize(11f)
+                    .textSize(M3.typeBody2)       // Miuix summary: 14sp
                     .textColor(M3.onSurfaceVariant)
                     .padding(top = 2.dp)
             }
