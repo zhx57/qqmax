@@ -9,6 +9,7 @@ import android.graphics.RectF
 import android.view.View
 import android.widget.Checkable
 import momoi.mod.qqpro.lib.dp
+import momoi.mod.qqpro.lib.dpf
 
 /**
  * A self-drawn Material 3 switch (no com.google.android.material dependency — it crashes at the watch
@@ -34,7 +35,7 @@ class M3Switch(ctx: Context) : View(ctx), Checkable {
 
     private val w = 44.dp
     private val h = 26.dp
-    private val pad = 2.5f.dp.toFloat()
+    private val pad = 2.5f.dpf
 
     init {
         isClickable = true
