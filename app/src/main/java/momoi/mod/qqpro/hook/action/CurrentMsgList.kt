@@ -413,7 +413,7 @@ object CurrentMsgList {
             }.onFailure { Utils.log("MsgList.NoEviction: failed to disable eviction: $it") }
         }
 
-        override fun d(ids: MutableList<Long>?) {
+        override fun d(ids: MutableList<Long>) {
             if (momoi.mod.qqpro.Settings.antiRecall.value) {
                 Utils.log("MsgList.NoEviction: antiRecall blocked d(ids=$ids), message preserved")
                 return
