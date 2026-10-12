@@ -25,6 +25,29 @@ import momoi.mod.qqpro.util.Utils
 import java.util.LinkedList
 
 object CurrentMsgList {
+    /**
+     * msgIds the USER deleted locally, with timestamps. Read by [NoEviction]: anti-recall blocks
+     * repo-level deletions to preserve peer-recalled messages, but a user's own delete must go
+     * through — this registry tells the two apart (a short window covers the async gap between
+     * the deleteMsg callback and the kernel's repo.d call).
+     */
+    object LocalDeleteMarker {
+        private const val WINDOW_MS = 15_000L
+        private val marked = HashMap<Long, Long>()
+
+        fun mark(ids: Collection<Long>) = synchronized(marked) {
+            val now = System.currentTimeMillis()
+            ids.forEach { marked[it] = now }
+            // Prune expired entries so the map can't grow unbounded.
+            marked.entries.removeAll { now - it.value > WINDOW_MS }
+        }
+
+        fun isLocal(id: Long): Boolean = synchronized(marked) {
+            val t = marked[id] ?: return false
+            if (System.currentTimeMillis() - t > WINDOW_MS) { marked.remove(id); false } else true
+        }
+    }
+
     lateinit var vb: WatchAIOListVB
         private set
     // The list UI operation API from the latest render — used to submit a new list live
@@ -85,6 +108,11 @@ object CurrentMsgList {
      */
     fun removeLive(ids: Set<Long>) {
         if (ids.isEmpty()) return
+        // Mark these as USER-initiated deletes BEFORE anything else: the kernel will call the
+        // repo's d(ids) right after, which NoEviction (anti-recall) must ALLOW for local deletes —
+        // otherwise the repo keeps the row, the next push re-adds it, and the message "revives"
+        // until chat re-entry (where the DB delete finally shows).
+        LocalDeleteMarker.mark(ids)
         ThreadManager.runOnUiThread({
             runCatching {
                 val op = uiOp ?: run { Utils.log("removeLive: uiOp null"); return@runCatching }
@@ -371,12 +399,12 @@ object CurrentMsgList {
                     // Anti-recall, peer recalls only: a recall arrives as an update of the ORIGINAL
                     // record with recallTime > 0. When the recalled message was sent by SOMEONE ELSE
                     // (senderUid != self), skip the update so the mirror keeps the pre-recall
-                    // content — the row stays, and the recall gray tip renders below it. My OWN
-                    // recall (senderUid == self) passes through and disappears normally with its
-                    // standard "你撤回了一条消息" gray tip. First-seen records with recallTime > 0
-                    // (history already containing an old recall) still load.
+                    // content. Gray-tip records (the "对方撤回了一条消息" notice) are EXEMPT — they
+                    // must pass so the notice renders under the preserved message. My OWN recall
+                    // (senderUid == self) passes through and disappears normally.
+                    val isGrayTip = item.d.elements?.any { it.grayTipElement != null } == true
                     val peerRecall = momoi.mod.qqpro.Settings.antiRecall.value &&
-                        item.d.recallTime > 0L && item.d.senderUid != SelfContact.peerUid
+                        item.d.recallTime > 0L && item.d.senderUid != SelfContact.peerUid && !isGrayTip
                     if (peerRecall) {
                         Utils.log("MsgList.n: antiRecall kept original of peer-recalled msgId=${item.d.msgId}")
                         continue
@@ -385,9 +413,16 @@ object CurrentMsgList {
                     merged.add(item)                               // updated in place
                     mi = j + 1
                 } else if (j == null) {
-                    // Recall gray tips ("你/对方 撤回了一条消息") now render for BOTH sides: my own
-                    // recall vanishes with its standard notice; a peer recall keeps the preserved
-                    // original with the notice underneath.
+                    // Anti-recall on reload: the kernel DB keeps the peer-recalled record (with
+                    // recallTime > 0) — without this, re-entering the chat renders the recalled
+                    // state and the preservation is lost. Clear the flag so the original content
+                    // renders again; the recall gray tip still loads below it as the notice.
+                    if (momoi.mod.qqpro.Settings.antiRecall.value &&
+                        item.d.recallTime > 0L && item.d.senderUid != SelfContact.peerUid
+                    ) {
+                        item.d.recallTime = 0L
+                        Utils.log("MsgList.n: antiRecall restored peer-recalled msgId=${item.d.msgId} on load")
+                    }
                     flushMirrorOlderThan(item.d.msgSeq)            // unseen: place by seq
                     merged.add(item)
                 } // else: duplicate msgId already emitted from the mirror — skip
@@ -448,7 +483,16 @@ object CurrentMsgList {
 
         override fun d(ids: MutableList<Long>) {
             if (momoi.mod.qqpro.Settings.antiRecall.value) {
-                Utils.log("MsgList.NoEviction: antiRecall blocked d(ids=$ids), message preserved")
+                // Anti-recall blocks repo-level deletions so peer-recalled messages stay in the
+                // live list — but the USER's own deletes must pass through, or the row survives in
+                // the repo, the next push re-adds it, and it "revives" until chat re-entry.
+                val localOnly = ids.isNotEmpty() && ids.all { LocalDeleteMarker.isLocal(it) }
+                if (localOnly) {
+                    Utils.log("MsgList.NoEviction: local delete d(ids=${ids.size}) allowed")
+                    super.d(ids)
+                } else {
+                    Utils.log("MsgList.NoEviction: antiRecall blocked d(ids=$ids), message preserved")
+                }
                 return
             }
             super.d(ids)
