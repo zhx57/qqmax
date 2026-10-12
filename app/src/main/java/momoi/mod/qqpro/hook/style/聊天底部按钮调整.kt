@@ -97,11 +97,11 @@ class 聊天底部按钮调整() : `InputBarController$inputContent$2`() {
         GroupScope(this).apply {
             // A FRESH drawable per button — one shared GradientDrawable instance can't back several
             // views at once (its bounds/callback follow the last view, so earlier ones, e.g. the "+",
-            // render as a thin sliver). Material accent circle for the side icon buttons.
-            val roundBg = { roundCornerDrawable(M3.primary, 9999f) }
-            // Material primary pill for the keyboard button — same accent color as the +/voice
-            // buttons (instead of QQ's native blue rounded-rect drawable).
-            val inputBg = { roundCornerDrawable(M3.primary, 9999f) }
+            // render as a thin sliver). Miuix: secondary chrome uses the neutral surfaceContainerHigh
+            // fill (Miuix secondaryVariant); the ACCENT (M3.primary) is reserved for the send key.
+            val roundBg = { roundCornerDrawable(M3.surfaceContainerHigh, 9999f) }
+            // Keyboard-key pill: same neutral tonal fill (was all-accent, which read as abrupt).
+            val inputBg = { roundCornerDrawable(M3.surfaceContainerHigh, 9999f) }
             val sideSpaceDp = Settings.screenCornerDiameter.value.toInt()
             // Baseline single-line height of the bar; buttons stay this tall while the EditText grows.
             val lineH = 36.dp
@@ -470,7 +470,8 @@ class 聊天底部按钮调整() : `InputBarController$inputContent$2`() {
                         val left = add<ImageView>().height(FILL).adjustViewBounds()
                             .scaleType(ImageView.ScaleType.FIT_CENTER).background(roundBg()).padding(8.dp)
                         if (Settings.attachmentOverlay.value) {
-                            left.setImageDrawable(plusIconDrawable())
+                            // Miuix row-icon tint (onSurfaceVariantActions) on the neutral circle.
+                            left.setImageDrawable(MaterialSymbol(MaterialSymbols.add, M3.onSurfaceTip))
                             left.clickable { hideIme(left); AttachmentOverlay.show(left, emoji) }
                         } else {
                             left.bitmapDecodeAssets("pro/ic_emoji.png")
