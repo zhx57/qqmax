@@ -397,14 +397,14 @@ object CurrentMsgList {
                 val j = indexById[item.d.msgId]
                 if (j != null && j >= mi) {
                     // Anti-recall, peer recalls only: a recall arrives as an update of the ORIGINAL
-                    // record with recallTime > 0. When the recalled message was sent by SOMEONE ELSE
-                    // (senderUid != self), skip the update so the mirror keeps the pre-recall
-                    // content. Gray-tip records (the "对方撤回了一条消息" notice) are EXEMPT — they
-                    // must pass so the notice renders under the preserved message. My OWN recall
-                    // (senderUid == self) passes through and disappears normally.
-                    val isGrayTip = item.d.elements?.any { it.grayTipElement != null } == true
+                    // record with recallTime > 0. Skip EVERY such peer update — the kernel ALSO
+                    // embeds a GrayTipElement into the recalled original record itself, so testing
+                    // "is it a gray tip?" here would let the recall through (the message vanished).
+                    // The separate "对方撤回了一条消息" gray-tip RECORD arrives as an unseen item
+                    // and inserts via the branch below — that is the notice under the preserved
+                    // message. My OWN recall (senderUid == self) passes and disappears normally.
                     val peerRecall = momoi.mod.qqpro.Settings.antiRecall.value &&
-                        item.d.recallTime > 0L && item.d.senderUid != SelfContact.peerUid && !isGrayTip
+                        item.d.recallTime > 0L && item.d.senderUid != SelfContact.peerUid
                     if (peerRecall) {
                         Utils.log("MsgList.n: antiRecall kept original of peer-recalled msgId=${item.d.msgId}")
                         continue
