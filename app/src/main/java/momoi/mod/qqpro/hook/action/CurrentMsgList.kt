@@ -26,17 +26,41 @@ import java.util.LinkedList
 
 object CurrentMsgList {
     /**
-     * Anti-recall vault: caches the PRE-recall [MsgRecord] for every message that flows through
-     * the list merge (per peer, per msgId). The kernel MUTATES the persisted record on recall
-     * (elements get replaced/marked server-side), so after exiting and re-entering a chat the
-     * freshly loaded record no longer carries the original content — only our snapshot does.
-     * In-memory (survives chat re-entry; a full app restart is a legitimate loss). Bounded: at
-     * most [CAP] records overall, oldest evicted first.
+     * Anti-recall vault: caches the PRE-recall message for every message that flows through the
+     * list merge (per peer, per msgId), in memory AND on disk.
+     *
+     * Why not patch QQ's own database: the NT message DB is encrypted (key held by the native
+     * kernel), its records are internal protobuf blobs, the kernel keeps its own cached connection
+     * (external writes risk corrupting the whole store), and — decisively — the SERVER is the
+     * source of truth: any local patch would be overwritten by the next server sync. So instead we
+     * persist OUR OWN snapshot file (plain JSON in our private dir) and rebuild an equivalent
+     * in-memory MsgRecord on load. That survives chat re-entry AND full app restarts.
+     *
+     * Non-text messages degrade to a text placeholder ("[图片]" etc.) on disk restore; the in-
+     * memory snapshot keeps full fidelity for the same session.
      */
     object AntiRecallVault {
-        private const val CAP = 400
-        private const val PEER_CAP = 120
         private val byPeer = HashMap<String, LinkedHashMap<Long, com.tencent.qqnt.kernel.nativeinterface.MsgRecord>>()
+        private val diskFile by lazy { java.io.File(Utils.application.filesDir, "qqpro_recall_vault.json") }
+
+        /** Extract a readable text summary from a record's elements (read-only, no mutation). */
+        private fun textOf(r: com.tencent.qqnt.kernel.nativeinterface.MsgRecord): String {
+            val sb = StringBuilder()
+            for (ele in r.elements.orEmpty()) {
+                ele.textElement?.content?.let { sb.append(it) }
+                ele.faceElement?.faceText?.let { sb.append(it) }
+                ele.marketFaceElement?.faceName?.let { sb.append(it) }
+                if (ele.picElement != null) sb.append("[图片]")
+                if (ele.pttElement != null) sb.append("[语音]")
+                if (ele.videoElement != null) sb.append("[视频]")
+                if (ele.fileElement != null) sb.append("[文件]")
+                ele.arkElement?.bytesData?.let { bytes ->
+                    runCatching { momoi.mod.qqpro.util.Json(String(bytes, Charsets.UTF_8)).str("prompt") }
+                        .getOrNull()?.let { sb.append(it) }
+                }
+            }
+            return sb.toString().ifBlank { "[消息]" }
+        }
 
         fun put(r: com.tencent.qqnt.kernel.nativeinterface.MsgRecord) {
             if (r.recallTime > 0L) return // never cache the recalled form
@@ -50,14 +74,70 @@ object CurrentMsgList {
                 }
                 map.remove(r.msgId)
                 map[r.msgId] = r
-                while (map.size > PEER_CAP) map.remove(map.keys.first())
+                while (map.size > 120) map.remove(map.keys.first())
             }
+            // Persist asynchronously into OUR private JSON file (QQ's own DB is never touched).
+            Thread {
+                runCatching {
+                    val root = org.json.JSONObject(if (diskFile.exists()) diskFile.readText() else "{}")
+                    val peerObj = root.optJSONObject(peer) ?: org.json.JSONObject()
+                    val entry = org.json.JSONObject()
+                        .put("seq", r.msgSeq)
+                        .put("senderUid", r.senderUid ?: "")
+                        .put("senderUin", r.senderUin)
+                        .put("time", r.msgTime)
+                        .put("chatType", r.chatType)
+                        .put("text", textOf(r))
+                    peerObj.put(r.msgId.toString(), entry)
+                    // Bound the disk file: keep the newest 60 entries per peer.
+                    while (peerObj.length() > 60) {
+                        val oldest = peerObj.keys().asSequence()
+                            .minByOrNull { peerObj.optJSONObject(it)?.optLong("time") ?: 0L }
+                        peerObj.remove(oldest)
+                    }
+                    root.put(peer, peerObj)
+                    diskFile.writeText(root.toString())
+                }.onFailure { Utils.log("AntiRecallVault: persist failed: ${it.message}") }
+            }.start()
         }
 
-        /** The cached pre-recall record for [msgId] in [peerUid], or null. */
+        /** The cached pre-recall record for [msgId] in [peerUid]: memory first, then disk. */
         fun restore(peerUid: String?, msgId: Long): com.tencent.qqnt.kernel.nativeinterface.MsgRecord? {
             if (peerUid == null) return null
-            return synchronized(byPeer) { byPeer[peerUid]?.get(msgId) }
+            synchronized(byPeer) { byPeer[peerUid]?.get(msgId) }?.let { return it }
+            // Disk fallback → rebuild an equivalent in-memory record (text form).
+            val snap = runCatching {
+                val root = org.json.JSONObject(if (diskFile.exists()) diskFile.readText() else "{}")
+                val entry = root.optJSONObject(peerUid)?.optJSONObject(msgId.toString()) ?: return null
+                val rec = com.tencent.qqnt.kernel.nativeinterface.MsgRecord()
+                rec.msgId = msgId
+                rec.msgSeq = entry.optLong("seq")
+                rec.senderUid = entry.optString("senderUid")
+                rec.senderUin = entry.optLong("senderUin")
+                rec.msgTime = entry.optLong("time")
+                rec.chatType = entry.optInt("chatType")
+                rec.peerUid = peerUid
+                rec.msgType = 1 // text
+                rec.recallTime = 0L
+                val ele = com.tencent.qqnt.kernel.nativeinterface.MsgElement()
+                ele.elementType = momoi.mod.qqpro.enums.ElementType.TEXT
+                ele.textElement = com.tencent.qqnt.kernel.nativeinterface.TextElement().apply {
+                    content = entry.optString("text")
+                }
+                rec.elements = arrayListOf(ele)
+                rec
+            }.getOrElse {
+                Utils.log("AntiRecallVault: disk restore failed: ${it.message}")
+                null
+            }
+            if (snap != null) {
+                synchronized(byPeer) {
+                    var map = byPeer[peerUid]
+                    if (map == null) { map = LinkedHashMap(); byPeer[peerUid] = map }
+                    map[msgId] = snap
+                }
+            }
+            return snap
         }
 
         fun clear() = synchronized(byPeer) { byPeer.clear() }
