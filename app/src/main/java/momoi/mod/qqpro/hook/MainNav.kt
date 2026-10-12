@@ -52,10 +52,10 @@ object MainNav {
     private const val QZONE_POLL_MS = 8000L   // re-read the QZone undeal count this often
     // Material 3 (dark) palette. The selected item sits on a tonal "active indicator" pill.
     private val ACCENT get() = M3.primary                   // on-secondary-container (selected icon)
-    private val PILL_COLOR get() = M3.primaryContainer      // secondary-container (active indicator pill)
-    private val IDLE_ICON = M3.onSurfaceVariant       // on-surface-variant (inactive icon)
-    private val DOT_COLOR = M3.onSurfaceVariant
-    private val BADGE_COLOR = M3.badge
+    private val PILL_COLOR get() = ((M3.primary and 0x00FFFFFF) or 0x2A_000000)      // MIUI translucent active pill
+    private val IDLE_ICON get() = M3.onSurfaceVariant       // on-surface-variant (inactive icon)
+    private val DOT_COLOR get() = M3.onSurfaceVariant
+    private val BADGE_COLOR get() = M3.badge
 
     // Live unread, kept in sync by the kernel listener — same source RichTitlebar uses.
     // ConcurrentHashMap: the kernel UnreadListener mutates this on a binder thread while the
@@ -211,9 +211,13 @@ object MainNav {
                 gravity = Gravity.CENTER
                 clipChildren = false
                 clipToPadding = false
-                // The bar otherwise sits over the window's pure black; fill it with the M3 page
-                // surface so it matches the materialized pages (chat list etc.) seamlessly.
-                setBackgroundColor(M3.surface)
+                // MIUIX Floating Island / Capsule background
+                background = GradientDrawable().apply {
+                    setColor(M3.surfaceContainer)
+                    cornerRadius = 9999f
+                    setStroke(1.dp, M3.outline)
+                }
+                setPadding(10.dp, 2.dp, 10.dp, 2.dp)
                 // Stay hidden until positionBar has placed us (bottom/top); otherwise the bar paints
                 // one frame at its default y=0 (top) before the deferred post moves it down — a visible
                 // flash at the top on every return to the home page in bottom mode.
@@ -378,6 +382,7 @@ object MainNav {
 
             val pos = i
             frame.isClickable = true
+            M3.attachMiuixTouchFeedback(frame, 0.94f)
             frame.setOnClickListener { handleNavTap(state, pos) }
 
             // Fixed cell width (or weighted in square mode) so the pill never reflows the row.
@@ -449,6 +454,7 @@ object MainNav {
 
             val pos = i
             frame.isClickable = true
+            M3.attachMiuixTouchFeedback(frame, 0.94f)
             frame.setOnClickListener { handleNavTap(state, pos) }
             // Evenly spread across the full width, like a phone bottom nav.
             nav.addView(frame, LinearLayout.LayoutParams(0, barHeight, 1f))
