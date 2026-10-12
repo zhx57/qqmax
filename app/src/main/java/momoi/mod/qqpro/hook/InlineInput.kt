@@ -583,11 +583,17 @@ object InlineInput {
                     banner = TextView(et.context).apply {
                         tag = BANNER_TAG
                         setTextColor(tokenColor)
-                        textSize = 11f
+                        textSize = 11.5f
                         gravity = Gravity.CENTER_VERTICAL
-                        setPadding(12.dp, 4.dp, 12.dp, 4.dp)
-                        setBackgroundColor(M3.surfaceContainer)
+                        setPadding(14.dp, 6.dp, 14.dp, 6.dp)
+                        // MIUIX card styling with smooth rounded corners and outline
+                        background = android.graphics.drawable.GradientDrawable().apply {
+                            setColor(M3.surfaceContainer)
+                            cornerRadius = 14.dp.toFloat()
+                            setStroke(1.dp, M3.outline)
+                        }
                         isClickable = true
+                        M3.attachMiuixTouchFeedback(this, 0.98f)
                         setOnClickListener { onBannerClick() }
                     }
                     content.addView(banner, FrameLayout.LayoutParams(

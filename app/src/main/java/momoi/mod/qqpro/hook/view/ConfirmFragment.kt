@@ -82,6 +82,7 @@ class ConfirmFragment(
             .padding(top = 10.dp, bottom = 10.dp)
             .apply {
                 background = GradientDrawable().apply { setColor(bg); cornerRadius = 22.dp.toFloat() }
+                M3.attachMiuixTouchFeedback(this, 0.95f)
             }
             .margin(top = 6.dp)
             .clickable(onClick)

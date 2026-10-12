@@ -145,7 +145,7 @@ class 聊天底部按钮调整() : `InputBarController$inputContent$2`() {
                         // Material: a rounded RECTANGLE (12dp corners — NOT a capsule) with a
                         // surface fill AND a 1dp outline, holding a reply/edit row on top of the input
                         // row (vertical). Non-material keeps the original translucent capsule (single row).
-                        val pillRadius = if (mat) M3.radiusMd else if (inlineGrow) (lineH / 2f) else 9999f
+                        val pillRadius = if (mat) 18.dp.toFloat() else if (inlineGrow) (lineH / 2f) else 9999f
                         val pill = create<LinearLayout>().height(FILL).weight(1f)
                             .background(
                                 if (mat) M3.filledOutlined(M3.surfaceContainer, M3.outline, pillRadius)
@@ -154,20 +154,16 @@ class 聊天底部按钮调整() : `InputBarController$inputContent$2`() {
                         if (mat) pill.vertical()
                         val send = create<ImageView>().scaleType(ImageView.ScaleType.FIT_CENTER).apply {
                             if (mat) {
-                                // Compact filled-primary send circle (26dp). Glyph kept at 16dp via the
-                                // 5dp padding (26 − 2·5). A bottom margin of (lineH − 26)/2 lifts it off
-                                // the row floor so its centre lines up with the other full-height buttons.
                                 size(26.dp, 26.dp)
                                 padding(5.dp)
                                 (layoutParams as? LinearLayout.LayoutParams)?.apply {
-                                    // Equal bottom + right inset so the circle is evenly spaced from the
-                                    // pill's bottom-right corner (centres it against the other buttons).
                                     val m = (lineH - 26.dp) / 2
                                     bottomMargin = m
                                     marginEnd = m
                                 }
                                 background = roundCornerDrawable(M3.primary, 9999f)
                                 setImageDrawable(MaterialSymbol(MaterialSymbols.send, M3.onPrimary))
+                                M3.attachMiuixTouchFeedback(this, 0.94f)
                             } else {
                                 height(lineH); adjustViewBounds(); padding(8.dp)
                                 setImageDrawable(sendIconDrawable())

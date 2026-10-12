@@ -84,11 +84,11 @@ object RichProfilePage {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
                 background = GradientDrawable().apply {
-                    cornerRadius = 18.dpf
+                    cornerRadius = M3.radiusLg
                     setColor(M3.surfaceContainer)
+                    setStroke(1.dp, M3.outline)
                 }
-                elevation = 3.dpf
-                setPadding(16.dp, 18.dp, 16.dp, 14.dp)
+                setPadding(16.dp, 20.dp, 16.dp, 16.dp)
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 )

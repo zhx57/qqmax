@@ -165,6 +165,8 @@ object ContactTopBar {
             clipToPadding = false
             setPadding(8.dp, 6.dp, 8.dp, 4.dp)
             for (b in listOf(add, friend, group, search)) {
+                b.setTonalContainer()
+                M3.attachMiuixTouchFeedback(b, 0.94f)
                 // Fixed circular button centered in a weighted cell so the row spreads evenly.
                 val cell = LinearLayout(ctx).apply {
                     gravity = Gravity.CENTER

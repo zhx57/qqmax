@@ -68,8 +68,10 @@ class HeaderStyler(
             // match the Material top bar; otherwise restore the native card bg + text color (this view
             // may have been a header before recycling).
             val material = Settings.materialContactsList.value
-            if (material) itemView.background = M3.ripple(M3.rounded(M3.surfaceContainer, M3.radiusLg))
-            else if (bgItem != 0) itemView.setBackgroundResource(bgItem)
+            if (material) {
+                itemView.background = M3.ripple(M3.rounded(M3.surfaceContainer, M3.radiusLg))
+                M3.attachMiuixTouchFeedback(itemView, 0.98f)
+            } else if (bgItem != 0) itemView.setBackgroundResource(bgItem)
             title?.apply {
                 // First normal row gives us the base size (in SP); reset others to it in case this
                 // view was previously a (1.35x bold) header. Don't resize the captured row itself.
