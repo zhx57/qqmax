@@ -1,9 +1,11 @@
 package momoi.mod.qqpro.hook
 
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import androidx.activity.OnBackPressedCallback
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
@@ -11,6 +13,8 @@ import androidx.recyclerview.widget.RecyclerView
 import com.tencent.watch.aio_impl.ui.WatchAIOFragment
 import com.tencent.watch.aio_impl.ui.frames.MenuFrame
 import momoi.mod.qqpro.findAll
+import momoi.mod.qqpro.lib.dp
+import momoi.mod.qqpro.lib.material.M3
 import momoi.mod.qqpro.util.Utils
 
 /**
@@ -60,12 +64,45 @@ object AttachmentOverlay {
             }
             val fm = aio.childFragmentManager
 
+            val innerCard = LinearLayout(container.context).apply {
+                orientation = LinearLayout.VERTICAL
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(M3.surfaceContainer)
+                    cornerRadius = 24.dp.toFloat()
+                    setStroke(1.dp, M3.outline)
+                }
+                clipToOutline = true
+                isClickable = true
+            }
+
+            // MIUIX Drag Handle
+            val handle = View(container.context).apply {
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                    setColor(0x4D_888888)
+                    cornerRadius = 9999f
+                }
+                val lp = LinearLayout.LayoutParams(36.dp, 4.dp).apply {
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    topMargin = 10.dp
+                    bottomMargin = 2.dp
+                }
+                layoutParams = lp
+            }
+            innerCard.addView(handle)
+
             val inner = FrameLayout(container.context).apply { id = View.generateViewId() }
+            innerCard.addView(inner, LinearLayout.LayoutParams(-1, -2))
+
             val box = FrameLayout(container.context).apply {
-                background = android.graphics.drawable.ColorDrawable(0x44_000000)
+                background = android.graphics.drawable.ColorDrawable(0x66_000000)
                 isClickable = true
                 setOnClickListener { dismiss() }
-                addView(inner, FrameLayout.LayoutParams(-1, -1))
+                val lp = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                    val m = 10.dp
+                    setMargins(m, m, m, m)
+                }
+                addView(innerCard, lp)
                 // If the host is destroyed without dismiss(), reset our state on detach.
                 addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                     override fun onViewAttachedToWindow(v: View) {}

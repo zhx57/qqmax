@@ -57,22 +57,19 @@ class MenuPanelLayout(p0: (Int) -> Unit, p1: Boolean) : MenuFrame(p0, p1) {
         if (list != null) {
             list.layoutManager = GridLayoutManager(list.context, 1)
             list.clipToPadding = false
-            if (Settings.materialAttachmentMenu.value) {
-                // One M3 surface card holding every row (matches the long-press menu): the rounded
-                // card is the RecyclerView itself, centered with side margins; rows scroll inside it.
-                list.background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(M3.surfaceContainer); cornerRadius = M3.radiusLg
-                }
-                list.clipToOutline = true
-                list.setPadding(0, 6.dp, 0, 6.dp)
-                list.layoutParams = android.widget.FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER,
-                ).apply { val m = 14.dp; setMargins(m, m, m, m) }
-            } else {
-                list.setPadding(8.dp, 0, 8.dp, 0)
+            // MIUIX Bottom Sheet / Floating Card container
+            list.background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(M3.surfaceContainer)
+                cornerRadius = M3.radiusLg + 4.dp // 24dp smooth corners
+                setStroke(1.dp, M3.outline)
             }
+            list.clipToOutline = true
+            list.setPadding(0, 10.dp, 0, 10.dp)
+            list.layoutParams = android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER,
+            ).apply { val m = 12.dp; setMargins(m, m, m, m) }
         }
-        Utils.log("MenuPanelLayout: switched to vertical list")
+        Utils.log("MenuPanelLayout: switched to MIUIX styled vertical list")
         return root
     }
 
@@ -124,6 +121,18 @@ class MenuPanelLayout(p0: (Int) -> Unit, p1: Boolean) : MenuFrame(p0, p1) {
         }.onFailure { Utils.log("MenuPanelLayout: inject 录像 failed: $it") }
     }
 
+    private fun miuixTileColorFor(text: String): Int = when {
+        text.contains("相册") -> 0xFF_2979FF.toInt()   // MIUI Blue
+        text.contains("拍") -> 0xFF_FF6D00.toInt()     // MIUI Orange
+        text.contains("录") -> 0xFF_F50057.toInt()     // MIUI Pink/Red
+        text.contains("表情") -> 0xFF_FFAB00.toInt()   // MIUI Gold Amber
+        text.contains("贴纸") -> 0xFF_00BFA5.toInt()   // MIUI Teal
+        text.contains("语音") || text.contains("通话") -> 0xFF_00C853.toInt() // MIUI Green
+        text.contains("艾特") -> 0xFF_7C4DFF.toInt()   // MIUI Purple
+        text.contains("音频") -> 0xFF_0091EA.toInt()   // MIUI Sky Blue
+        else -> M3.primary
+    }
+
     private fun restyleCell(cell: View) {
         val ll = cell as? LinearLayout ?: return
         var icon: ImageView? = null
@@ -136,34 +145,25 @@ class MenuPanelLayout(p0: (Int) -> Unit, p1: Boolean) : MenuFrame(p0, p1) {
         if (icon == null || label == null) return
 
         val labelText = label.text?.toString().orEmpty()
-        val material = Settings.materialAttachmentMenu.value
 
         ll.orientation = LinearLayout.HORIZONTAL
         ll.gravity = Gravity.CENTER_VERTICAL
-        if (material) {
-            // A plain ripple row INSIDE the single surface card (the RecyclerView) — no per-row card.
-            ll.background = android.graphics.drawable.RippleDrawable(
-                android.content.res.ColorStateList.valueOf(0x33_888888), null,
-                android.graphics.drawable.ColorDrawable(android.graphics.Color.WHITE))
-            // Tighter vertical padding → smaller gap between rows.
-            ll.setPadding(16.dp, 8.dp, 16.dp, 8.dp)
-        } else {
-            // R.drawable.watch_normal_button_white_bg — the original per-row (non-material) card.
-            ll.background = androidx.core.content.ContextCompat.getDrawable(ll.context, 0x7e080ea8)
-                ?: roundCornerDrawable(0x80_242424.toInt(), 14.dpf)
-            ll.cardMargin()
-            ll.setPadding(14.dp, 10.dp, 14.dp, 10.dp)
-        }
+        // Smooth MIUIX item ripple & touch recoil
+        ll.background = M3.ripple(null)
+        ll.setPadding(16.dp, 8.dp, 16.dp, 8.dp)
+        M3.attachMiuixTouchFeedback(ll, 0.96f)
 
-        // Icon on the left: Material symbol (accent) or the original hand-drawn drawable.
+        // MIUIX Squircle Colorful Icon Tile
+        val tileBg = miuixTileColorFor(labelText)
+        val symbolPath = materialSymbolFor(labelText)
+        val iconTile = MaterialSymbol.circled(symbolPath, 0xFF_FFFFFF.toInt(), tileBg)
         icon.scaleType = ImageView.ScaleType.FIT_CENTER
-        icon.setImageDrawable(
-            if (material) MaterialSymbol(materialSymbolFor(labelText), M3.primary) else iconFor(labelText))
-        icon.layoutParams = LinearLayout.LayoutParams(28.dp, 28.dp)
+        icon.setImageDrawable(iconTile)
+        icon.layoutParams = LinearLayout.LayoutParams(36.dp, 36.dp)
 
-        // Label fills the rest, left-aligned.
+        // Label fills the rest, left-aligned with MIUI typography
         label.gravity = Gravity.CENTER_VERTICAL or Gravity.START
-        label.textSize = 14f
+        label.textSize = 14.5f
         label.setTextColor(M3.onSurface)
         label.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
             marginStart = 12.dp

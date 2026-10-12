@@ -80,6 +80,10 @@ object CurrentMsgList {
      */
     fun removeLive(ids: Set<Long>) {
         if (ids.isEmpty()) return
+        if (momoi.mod.qqpro.Settings.antiRecall.value) {
+            Utils.log("CurrentMsgList: antiRecall enabled, blocked removeLive for ${ids.size} item(s)")
+            return
+        }
         ThreadManager.runOnUiThread({
             runCatching {
                 val op = uiOp ?: run { Utils.log("removeLive: uiOp null"); return@runCatching }

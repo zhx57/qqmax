@@ -332,6 +332,8 @@ object Settings {
     // 0 = original image, 0.9 = almost black. Applied as a black overlay on top
     // of the picked image. Takes effect the next time a chat is opened.
     val chatBgDarken = FloatPref("chatBgDarken", 0.35f)
+    // Prevent incoming messages from being revoked/removed from the live chat list.
+    val antiRecall = BooleanPref("antiRecall", true)
     // Automatically check for a new QQ Max release on launch (via OTAManager2). Backed by
     // OTAManager2's own prefs so the toggle and the dialog's "不再提醒" share one state.
     val autoUpdateCheck = OtaBooleanPref("update_check_enabled", true)

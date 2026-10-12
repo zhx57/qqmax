@@ -161,18 +161,125 @@ class 设置页 : SettingsActivity() {
         showCategoryList()
     }
 
-    /** Build the persistent top-level list: app header + one tappable card per category. */
+    /** Build the persistent top-level list with MIUIX large title and grouped preference cards. */
     private fun showCategoryList() {
         val root = settingsRoot ?: return
         root.removeAllViews()
         root.content {
-            section("NWear QQ Pro / Max", "by 爅峫 · java30433 · AILIFE")
-            for (cat in buildCategories()) {
-                actionCard(cat.title, cat.subtitle) { showCategory(cat) }
+            // MIUIX Standard Large Title
+            add<TextView>()
+                .text("设置")
+                .textSize(26f)
+                .textColor(M3.onSurface)
+                .typeface(Typeface.DEFAULT_BOLD)
+                .padding(left = 4.dp, top = 14.dp, right = 4.dp, bottom = 2.dp)
+            add<TextView>()
+                .text("QQ Max · 澎湃风格")
+                .textSize(12f)
+                .textColor(M3.onSurfaceVariant)
+                .padding(left = 4.dp, top = 0.dp, right = 4.dp, bottom = 12.dp)
+
+            // Grouped Categories in MIUIX Cards
+            val categories = buildCategories()
+            val groups = listOf(
+                "个性与界面" to categories.filter { it.title in listOf("外观主题", "Material 化", "菜单自定义") },
+                "聊天与会话" to categories.filter { it.title in listOf("聊天输入", "聊天显示", "群聊头像", "标题栏与未读", "主页导航") },
+                "扩展与系统" to categories.filter { it.title in listOf("关于与更新", "调试") }
+            )
+
+            for ((groupTitle, list) in groups) {
+                if (list.isEmpty()) continue
+                add<TextView>()
+                    .text(groupTitle)
+                    .textSize(12f)
+                    .textColor(M3.onSurfaceVariant)
+                    .typeface(Typeface.DEFAULT_BOLD)
+                    .padding(left = 6.dp, top = 12.dp, right = 6.dp, bottom = 6.dp)
+
+                val groupCard = add<LinearLayout>()
+                    .width(FILL)
+                    .vertical()
+                groupCard.background(GradientDrawable().apply {
+                    setColor(M3.surfaceContainer)
+                    cornerRadius = 20.dp.toFloat()
+                })
+                groupCard.clipToOutline = true
+                groupCard.margin(top = 2.dp, bottom = 8.dp)
+
+                list.forEachIndexed { index, cat ->
+                    if (index > 0) {
+                        val div = View(this@设置页).apply {
+                            setBackgroundColor(M3.outlineVariant)
+                            layoutParams = LinearLayout.LayoutParams(FILL, 1.dp).apply {
+                                marginStart = 52.dp; marginEnd = 12.dp
+                            }
+                        }
+                        groupCard.addView(div)
+                    }
+
+                    val row = LinearLayout(this@设置页).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(12.dp, 10.dp, 12.dp, 10.dp)
+                        background = M3.ripple(null)
+                        M3.attachMiuixTouchFeedback(this, 0.98f)
+                        setOnClickListener { showCategory(cat) }
+                    }
+
+                    val (sym, tileColor) = categoryIconInfo(cat.title)
+                    val iconTile = ImageView(this@设置页).apply {
+                        setImageDrawable(MaterialSymbol.circled(sym, 0xFF_FFFFFF.toInt(), tileColor))
+                        layoutParams = LinearLayout.LayoutParams(34.dp, 34.dp).apply { marginEnd = 12.dp }
+                    }
+                    row.addView(iconTile)
+
+                    val textCol = LinearLayout(this@设置页).apply {
+                        orientation = LinearLayout.VERTICAL
+                        layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f)
+                    }
+                    val t = TextView(this@设置页).apply {
+                        text = cat.title
+                        textSize = 14.5f
+                        typeface = Typeface.DEFAULT_BOLD
+                        setTextColor(M3.onSurface)
+                    }
+                    val s = TextView(this@设置页).apply {
+                        text = cat.subtitle
+                        textSize = 11f
+                        setTextColor(M3.onSurfaceVariant)
+                        visibility = if (cat.subtitle.isEmpty()) View.GONE else View.VISIBLE
+                    }
+                    textCol.addView(t)
+                    textCol.addView(s)
+                    row.addView(textCol)
+
+                    val arr = TextView(this@设置页).apply {
+                        setTextColor(M3.onSurfaceVariant)
+                        leadingSymbol(MaterialSymbols.chevron_right, M3.onSurfaceVariant, sizeDp = 18, gap = 0)
+                    }
+                    row.addView(arr)
+
+                    groupCard.addView(row)
+                }
             }
-            add<View>()
-                .height(64.dp)
+            add<View>().height(64.dp)
         }
+    }
+
+    private fun categoryIconInfo(title: String): Pair<String, Int> = when {
+        title.contains("外观") -> MaterialSymbols.palette to 0xFF_2979FF.toInt()
+        title.contains("Material") || title.contains("MIUIX") -> MaterialSymbols.layers to 0xFF_7C4DFF.toInt()
+        title.contains("菜单") -> MaterialSymbols.menu to 0xFF_00BFA5.toInt()
+        title.contains("输入") -> MaterialSymbols.keyboard to 0xFF_FFAB00.toInt()
+        title.contains("显示") -> MaterialSymbols.image to 0xFF_00C853.toInt()
+        title.contains("头像") -> MaterialSymbols.account_circle to 0xFF_0091EA.toInt()
+        title.contains("标题栏") -> MaterialSymbols.push_pin to 0xFF_FF6D00.toInt()
+        title.contains("导航") -> MaterialSymbols.navigation to 0xFF_26A69A.toInt()
+        title.contains("通话") -> MaterialSymbols.call to 0xFF_43A047.toInt()
+        title.contains("空间") -> MaterialSymbols.star to 0xFF_FDD835.toInt()
+        title.contains("关于") -> MaterialSymbols.info to 0xFF_5C6BC0.toInt()
+        title.contains("调试") -> MaterialSymbols.bug_report to 0xFF_78909C.toInt()
+        else -> MaterialSymbols.settings to 0xFF_007DFF.toInt()
     }
 
     /**
@@ -332,6 +439,7 @@ class 设置页 : SettingsActivity() {
             switch("多选复制含发送者", "多选复制/部分复制时，每条消息前加上发送者名字(“名字：内容”)", Settings.multiSelectCopySender)
         },
         SettingsCategory("聊天输入", "输入框、发送方式与表情") {
+            switch("消息防撤回", "阻止对方撤回消息并保留消息内容，撤回时在消息上标记已撤回", Settings.antiRecall)
             switch("聊天页直接输入", "在聊天页用输入框替换键盘键，有文字时麦克风键变发送键", Settings.inlineChatInput)
             switch("完全行内输入", "彻底不打开输入法页面：@、图片、回复、编辑、语音转文字都在输入框内完成。@xxx 与 [图片] 整体删除，回复/编辑在输入框上方显示横幅可点击取消(需开启“聊天页直接输入”)", Settings.fullInlineInput)
             switch("行内发送按钮", "输入页将发送键移到输入框右侧，左侧加关闭键取消发送", Settings.inlineSendButton)
@@ -567,15 +675,16 @@ class 设置页 : SettingsActivity() {
         desc: String,
         pref: Pref<Boolean>
     ) = card { card ->
+        lateinit var sw: M3Switch
         card.content {
             titleColumn(title, desc).weight(1f)
-            // Our own Material switch (M3Switch), themed from the M3 accent — replaces the base app's
-            // native toggle so it follows the user's theme color.
-            val sw = M3Switch(this@设置页)
+            sw = M3Switch(this@设置页)
             sw.setChecked(pref.value, notify = false)
             sw.onChange = { pref.value = it }
             add(sw)
         }
+        card.rippleTouch()
+        card.onClick { sw.toggle() }
     }
 
     /** A tappable card row with a ›-style affordance; runs [onTap] when pressed. */
@@ -587,9 +696,9 @@ class 设置页 : SettingsActivity() {
         card.content {
             titleColumn(title, desc).weight(1f)
             add<TextView>()
-                .textColor(ACCENT)
+                .textColor(M3.onSurfaceVariant)
                 .gravity(Gravity.CENTER_VERTICAL)
-                .leadingSymbol(MaterialSymbols.chevron_right, ACCENT, sizeDp = 18, gap = 0)
+                .leadingSymbol(MaterialSymbols.chevron_right, M3.onSurfaceVariant, sizeDp = 18, gap = 0)
         }
         card.rippleTouch()
         card.onClick { onTap() }
@@ -1188,28 +1297,31 @@ class 设置页 : SettingsActivity() {
         column.content {
             add<TextView>()
                 .text(title)
-                .textSize(13f)
+                .textSize(14.5f)
                 .textColor(M3.onSurface)
+                .apply { typeface = Typeface.DEFAULT_BOLD }
             if (desc.isNotEmpty()) {
                 add<TextView>()
                     .text(desc)
-                    .textSize(10f)
+                    .textSize(11f)
                     .textColor(M3.onSurfaceVariant)
+                    .padding(top = 2.dp)
             }
         }
         return column
     }
 
-    /** A rounded dark card row with consistent margins. */
-    private inline fun GroupScopeFix.card(block: (LinearLayout) -> Unit) {
+    /** A rounded MIUIX continuous squircle card row. */
+    private inline fun GroupScopeFix.card(crossinline block: (LinearLayout) -> Unit) {
         val card = add<LinearLayout>()
             .width(FILL)
-            .padding(12.dp)
+            .padding(14.dp, 12.dp, 14.dp, 12.dp)
         card.background(GradientDrawable().apply {
             setColor(M3.surfaceContainer)
-            cornerRadius = 14.dp.toFloat()
+            cornerRadius = 20.dp.toFloat()
         })
-        card.margin(top = CARD_MARGIN_DP.dp, bottom = CARD_MARGIN_DP.dp)
+        card.margin(top = 3.dp, bottom = 3.dp)
+        M3.attachMiuixTouchFeedback(card, 0.985f)
         block(card)
     }
 }

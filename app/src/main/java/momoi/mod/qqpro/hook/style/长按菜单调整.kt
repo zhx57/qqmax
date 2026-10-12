@@ -107,16 +107,29 @@ object LongPressMenu {
         menuScope.launch {
             val actions = buildMessageActions(card, msg, msgItem, fm, isHistory, names, native)
             if (!fragment.isAdded) return@launch
-            actions.forEach { e -> card.addView(rowFor(fragment, e, material)) }
+            actions.forEachIndexed { i, e ->
+                if (i > 0) {
+                    val div = View(ctx).apply {
+                        setBackgroundColor(M3.outlineVariant)
+                        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1.dp).apply {
+                            marginStart = 52.dp; marginEnd = 14.dp
+                        }
+                    }
+                    card.addView(div)
+                }
+                card.addView(rowFor(fragment, e, material))
+            }
         }
 
         // The rounded frame is the (fixed) ScrollView; rows scroll INSIDE it.
         val scroll = ScrollView(ctx).apply {
-            if (material) {
-                background = GradientDrawable().apply { setColor(M3.surfaceContainer); cornerRadius = M3.radiusLg }
-                clipToOutline = true
-                setPadding(0, 6.dp, 0, 6.dp)
+            background = GradientDrawable().apply {
+                setColor(M3.surfaceContainer)
+                cornerRadius = 22.dp.toFloat()
+                setStroke(1.dp, M3.outline)
             }
+            clipToOutline = true
+            setPadding(0, 6.dp, 0, 6.dp)
             isVerticalScrollBarEnabled = false
             isClickable = true
             addView(card, FrameLayout.LayoutParams(MP, WC))
@@ -148,21 +161,12 @@ object LongPressMenu {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(18.dp, 12.dp, 18.dp, 12.dp)
             isClickable = true
-            background = if (material) {
-                RippleDrawable(ColorStateList.valueOf(0x33_888888), null, ColorDrawable(Color.WHITE))
-            } else {
-                val pill = GradientDrawable().apply { setColor(0x80_242424.toInt()); cornerRadius = 14.dp.toFloat() }
-                RippleDrawable(ColorStateList.valueOf(0x33_FFFFFF), pill, pill)
-            }
+            background = M3.ripple(null)
+            M3.attachMiuixTouchFeedback(this, 0.96f)
             setOnClickListener { onClick() }
-            if (!material) {
-                layoutParams = LinearLayout.LayoutParams(MP, WC).apply {
-                    leftMargin = 10.dp; rightMargin = 10.dp; topMargin = 3.dp; bottomMargin = 3.dp
-                }
-            }
             addView(ImageView(ctx).apply { setImageDrawable(MaterialSymbol(e.symbol, tint)) },
                 LinearLayout.LayoutParams(22.dp, 22.dp))
-            addView(TextView(ctx).apply { text = e.label; setTextColor(textColor); textSize = 15f },
+            addView(TextView(ctx).apply { text = e.label; setTextColor(textColor); textSize = 15f; typeface = android.graphics.Typeface.DEFAULT_BOLD },
                 LinearLayout.LayoutParams(0, WC, 1f).apply { marginStart = 16.dp })
         }
     }
