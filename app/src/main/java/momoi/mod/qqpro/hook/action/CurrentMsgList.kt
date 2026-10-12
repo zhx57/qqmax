@@ -336,42 +336,50 @@ object CurrentMsgList {
             // empty RecyclerView (incoming list size 0 → blank chat) is distinguishable from a
             // render-side problem (non-zero list but cells invisible). peer ties it to the chat.
             Utils.log("MsgList.n: peer=${CurrentContact.peerUid} updateType=$updateType incomingSize=${list.size} mirrorSize=${msg.size} types=[${list.take(8).joinToString(",") { runCatching { "${it.d.msgType}/${it.javaClass.simpleName}" }.getOrElse { "?" } }}]")
-            // Reconcile EVERY incoming item into the accumulated mirror, then render the mirror.
+            // Seq-positioned merge: reconcile the incoming state into the accumulated mirror and
+            // render the merged result. Both lists are oldest-first.
             //
-            // The previous merge broke out at the FIRST match (newest end) and rendered
-            // incoming-head + mirror-tail. When the kernel pushes a PARTIAL window (status/read
-            // updates that carry only the most recent items, some next-page results), the incoming
-            // head no longer covers the whole mirror, so everything OLDER than the window vanished
-            // from the render — and the truncation was written back into the mirror via
-            // msgList.update(list), making those messages disappear until chat re-entry. That was
-            // the intermittent "some messages are missing until you reopen the chat" bug.
+            // History of this merge:
+            //  v1 (upstream/ours): break at the FIRST match from the newest end, render
+            //      incoming-head + mirror-tail. BROKE on partial windows (status/read updates that
+            //      carry only the newest few items): everything older than the window vanished from
+            //      the render AND the truncation was written back into the mirror — the
+            //      "messages missing until chat re-entry" bug.
+            //  v2: reconcile every incoming item, unseen ones appended at the tail. BROKE older-page
+            //      loads: a batch of history items the mirror had never seen got APPENDED AFTER the
+            //      newest messages — completely scrambled order, broken jump targets.
             //
-            // Newer items may arrive in any batch composition, so: poll newest→oldest; update
-            // matches in place; insert unseen items at the tail (keeping batch order); never break
-            // early. The full mirror is then the authoritative render list.
-            var insertIndex = -1
-            // msgId -> mirror index. Built once per push (O(n)); safe to keep across inserts because
-            // unseen items are only ever inserted at the tail region (>= the original size), so all
-            // pre-existing indices stay valid.
+            //  v3 (this): walk incoming oldest→newest, keeping a cursor into the mirror:
+            //    - a matched item emits the mirror items BEFORE its index that incoming didn't
+            //      cover, then the updated item (order always preserved, nothing truncated);
+            //    - an UNSEEN item is placed by msgSeq: mirror items older than it flush first, so
+            //      older-page batches land BEFORE the known messages and live new messages land
+            //      AFTER them — regardless of which side is newer;
+            //    - duplicates in the incoming batch (already emitted) are skipped.
+            //    The remaining mirror tail flushes last. The merged result becomes both the render
+            //    list and the new mirror.
+            val merged = ArrayList<WatchAIOMsgItem>(msg.size + list.size)
             val indexById = HashMap<Long, Int>(msg.size * 2)
-            msg.forEachIndexed { i, it -> indexById[it.d.msgId] = i }
-            while (true) {
-                val last = list.pollLast() ?: break
-                val index = indexById[last.d.msgId]
-                if (index == null) {
-                    if (insertIndex == -1) {
-                        msg.add(last)
-                        insertIndex = msg.lastIndex
-                    } else {
-                        msg.add(insertIndex, last)
-                    }
-                } else {
-                    msg[index] = last
-                }
+            msg.forEachIndexed { i, it -> indexById.putIfAbsent(it.d.msgId, i) }
+            var mi = 0
+            fun flushMirrorOlderThan(seq: Long) {
+                while (mi < msg.size && msg[mi].d.msgSeq < seq) { merged.add(msg[mi]); mi++ }
             }
+            for (item in list) {
+                val j = indexById[item.d.msgId]
+                if (j != null && j >= mi) {
+                    while (mi < j) { merged.add(msg[mi]); mi++ }   // mirror-only items before it
+                    merged.add(item)                               // updated in place
+                    mi = j + 1
+                } else if (j == null) {
+                    flushMirrorOlderThan(item.d.msgSeq)            // unseen: place by seq
+                    merged.add(item)
+                } // else: duplicate msgId already emitted from the mirror — skip
+            }
+            while (mi < msg.size) { merged.add(msg[mi]); mi++ }    // flush the remaining mirror tail
             list.clear()
-            list.addAll(msg)
-            msgList.update(list.toMutableList())
+            list.addAll(merged)
+            msgList.update(merged)
             Utils.log("MsgList.n: after merge finalSize=${list.size} (handing to native render)")
             // Notify pre-page waiters only for older-history results (bit 0x4), after msgList is
             // updated so they observe the new size.
