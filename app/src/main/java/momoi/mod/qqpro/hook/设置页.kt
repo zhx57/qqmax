@@ -230,13 +230,11 @@ class 设置页 : SettingsActivity() {
                     val (sym, tileColor) = categoryIconInfo(cat.title)
                     val iconTile = ImageView(this@设置页).apply {
                         setImageDrawable(MaterialSymbol.circled(sym, 0xFF_FFFFFF.toInt(), tileColor))
-                        layoutParams = LinearLayout.LayoutParams(34.dp, 34.dp).apply { marginEnd = 12.dp }
                     }
-                    row.addView(iconTile)
+                    row.addView(iconTile, LinearLayout.LayoutParams(34.dp, 34.dp).apply { marginEnd = 12.dp })
 
                     val textCol = LinearLayout(this@设置页).apply {
                         orientation = LinearLayout.VERTICAL
-                        layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f)
                     }
                     val t = TextView(this@设置页).apply {
                         text = cat.title
@@ -252,7 +250,7 @@ class 设置页 : SettingsActivity() {
                     }
                     textCol.addView(t)
                     textCol.addView(s)
-                    row.addView(textCol)
+                    row.addView(textCol, LinearLayout.LayoutParams(0, WRAP, 1f))
 
                     val arr = TextView(this@设置页).apply {
                         setTextColor(M3.onSurfaceVariant)
