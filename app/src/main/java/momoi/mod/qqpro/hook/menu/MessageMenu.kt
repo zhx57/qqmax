@@ -214,7 +214,7 @@ suspend fun buildMessageActions(
         picEl != null -> add("save", "保存", MaterialSymbols.download) { withPicFile(host, picEl) { f -> saveFileTo(host, f) } }
         caps.mfFile != null -> add("save", "保存", MaterialSymbols.download) { saveFileTo(host, caps.mfFile) }
     }
-    // 翻译 / 隐藏翻译 / 朗读. Our own translate (ai-life endpoint) replaces QQ's native
+    // 翻译 / 隐藏翻译 / 朗读. Our own translate (MyMemory endpoint) replaces QQ's native
     // TranslateText for text messages; otherwise fall back to the native entries.
     val ourTranslate = !isHistory && msg != null && caps.fwdText != null
     // History (合并转发) text bubbles have no live cell, so translation renders into the forward
