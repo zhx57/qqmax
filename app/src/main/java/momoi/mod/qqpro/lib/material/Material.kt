@@ -455,6 +455,11 @@ class MaterialIconButton(ctx: Context) : FrameLayout(ctx) {
         background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(M3.TONAL) }
     }
 
+    /** Neutral Miuix toolbar button: surfaceContainerHigh circle (Miuix secondaryVariant). */
+    fun setNeutralContainer() {
+        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(M3.surfaceContainerHigh) }
+    }
+
     /** Show/hide the unread badge ("99+" cap); count <= 0 hides it. */
     fun setBadgeCount(count: Int) {
         if (count > 0) {

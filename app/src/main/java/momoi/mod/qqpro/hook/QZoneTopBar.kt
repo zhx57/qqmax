@@ -91,7 +91,8 @@ object QZoneTopBar {
     }
 
     private fun buildBar(ctx: Context, host: QZoneMainFrameHook): LinearLayout {
-        val c = M3.ACCENT
+        // Miuix toolbar row: neutral circles + regular-tint glyphs (accent is reserved for actions).
+        val c = M3.onSurface
 
         // Round avatar ImageView — loads self avatar from QQ CDN using current user uin.
         val avatarIv = ImageView(ctx).apply {
@@ -116,7 +117,7 @@ object QZoneTopBar {
 
         val editBtn = MaterialIconButton(ctx).apply {
             setIcon(MaterialSymbol(MaterialSymbols.edit, c))
-            setTonalContainer()
+            setNeutralContainer()
             setOnClickListener {
                 runCatching { host.barPublish() }.onFailure { Utils.log("QZoneTopBar edit click: $it") }
             }
@@ -124,7 +125,7 @@ object QZoneTopBar {
 
         val notifyBtn = MaterialIconButton(ctx).apply {
             setIcon(MaterialSymbol(MaterialSymbols.notifications, c))
-            setTonalContainer()
+            setNeutralContainer()
             setOnClickListener {
                 runCatching { host.barNotify() }.onFailure { Utils.log("QZoneTopBar notify click: $it") }
             }

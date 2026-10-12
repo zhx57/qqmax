@@ -77,13 +77,14 @@ object CurrentMsgList {
      * Remove messages from the currently open chat list in place, by msgId. Native local delete
      * ("删除", not 撤回) updates the DB but doesn't refresh the open AIO list — it only shows on
      * re-entry. We submit a filtered list to the data-submit API so the row disappears live.
+     *
+     * NOTE: this is ONLY called from user-initiated local deletes (长按菜单"删除" / 多选删除),
+     * so it must NOT be gated by [Settings.antiRecall] — that toggle is about REMOTE recalls
+     * (AntiRecallHook.onMsgRecall + NoEviction.d), never about the user's own delete action.
+     * Gating it here made locally-deleted messages linger until chat re-entry.
      */
     fun removeLive(ids: Set<Long>) {
         if (ids.isEmpty()) return
-        if (momoi.mod.qqpro.Settings.antiRecall.value) {
-            Utils.log("CurrentMsgList: antiRecall enabled, blocked removeLive for ${ids.size} item(s)")
-            return
-        }
         ThreadManager.runOnUiThread({
             runCatching {
                 val op = uiOp ?: run { Utils.log("removeLive: uiOp null"); return@runCatching }

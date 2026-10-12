@@ -149,9 +149,11 @@ object ContactTopBar {
         return wrap
     }
 
-    /** Four evenly-weighted circular tonal icon buttons; keeps refs to the badged notify buttons. */
+    /** Four evenly-weighted circular neutral icon buttons (Miuix toolbar row); keeps refs to the badged notify buttons. */
     private fun buildActionBar(ctx: Context, host: ContactListFragmentHook): LinearLayout {
-        val c = M3.ACCENT
+        // Miuix: toolbar actions are neutral — regular-tint glyphs on surfaceContainerHigh circles.
+        // (The old accent-on-accentContainer combo rendered as loud blue-on-blue blobs.)
+        val c = M3.onSurface
         val add = iconButton(ctx, AddPersonIcon(c)) { host.topAddFriend() }
         val friend = iconButton(ctx, FriendNotifyIcon(c)) { host.topFriendNotify() }
         val group = iconButton(ctx, GroupNotifyIcon(c)) { host.topGroupNotify() }
@@ -165,7 +167,7 @@ object ContactTopBar {
             clipToPadding = false
             setPadding(8.dp, 6.dp, 8.dp, 4.dp)
             for (b in listOf(add, friend, group, search)) {
-                b.setTonalContainer()
+                b.setNeutralContainer()
                 M3.attachMiuixTouchFeedback(b, 0.94f)
                 // Fixed circular button centered in a weighted cell so the row spreads evenly.
                 val cell = LinearLayout(ctx).apply {
@@ -203,7 +205,7 @@ object ContactTopBar {
     private fun iconButton(ctx: Context, icon: android.graphics.drawable.Drawable, onClick: () -> Unit): MaterialIconButton =
         MaterialIconButton(ctx).apply {
             setIcon(icon)
-            setTonalContainer()                 // monochrome icons → M3 tonal circle behind them
+            setNeutralContainer()               // monochrome icons → neutral Miuix circle behind them
             setOnClickListener { runCatching { onClick() }.onFailure { Utils.log("ContactTopBar click: $it") } }
         }
 
@@ -213,8 +215,8 @@ object ContactTopBar {
      */
     private fun buildSearchRow(ctx: Context): Pair<View, EditText> {
         val back = MaterialIconButton(ctx).apply {
-            setIcon(BackArrowIcon(M3.ACCENT))
-            setTonalContainer()
+            setIcon(BackArrowIcon(M3.onSurface))
+            setNeutralContainer()
             setOnClickListener { closeSearch() }
         }
         val et = M3.searchField(ctx, "搜索好友/群聊")

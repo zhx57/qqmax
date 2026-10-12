@@ -215,12 +215,12 @@ object MemberListSearch {
         runCatching { adapter.submitList(result) }.onFailure { Utils.log("MemberSearch apply: $it") }
     }
 
-    // Accent-tinted icon in an M3 tonal circle, matching the other top bars (ContactTopBar/QZoneTopBar
-    // use MaterialIconButton(30dp) + setTonalContainer()).
+    // Regular-tint icon in a neutral Miuix circle, matching the other top bars (ContactTopBar /
+    // QZoneTopBar use MaterialIconButton(30dp) + setNeutralContainer()).
     private fun icon(ctx: Context, path: String): MaterialIconButton = MaterialIconButton(ctx).apply {
         layoutParams = LinearLayout.LayoutParams(30.dp, 30.dp)
-        setIcon(MaterialSymbol(path, M3.ACCENT))
-        setTonalContainer()
+        setIcon(MaterialSymbol(path, M3.onSurface))
+        setNeutralContainer()
     }
 
     private fun infoOf(item: GroupMemberItem): MemberInfo? = runCatching {
