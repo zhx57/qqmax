@@ -1330,4 +1330,4 @@ class 设置页 : SettingsActivity() {
     }
 }
 
-private typealias GroupScopeFix = momoi.mod.qqpro.lib.LinearScope
+typealias GroupScopeFix = momoi.mod.qqpro.lib.LinearScope
