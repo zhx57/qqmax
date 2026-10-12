@@ -14,6 +14,8 @@ import com.tencent.aio.data.msglist.IMsgItem
 import com.tencent.aio.main.fragment.ChatFragment
 import com.tencent.aio.part.root.panel.content.firstLevel.msglist.mvx.data.MsgListRepo
 import com.tencent.aio.part.root.panel.content.firstLevel.msglist.mvx.intent.MsgListDataIntent
+import com.tencent.qqnt.kernel.nativeinterface.GrayTipElement
+import com.tencent.qqnt.kernel.nativeinterface.MsgRecord
 import com.tencent.watch.aio_impl.coreImpl.repo.WatchMsgListRepo
 import com.tencent.watch.aio_impl.coreImpl.vb.WatchAIOListVB
 import com.tencent.watch.aio_impl.data.WatchAIOMsgItem
@@ -41,6 +43,14 @@ object CurrentMsgList {
     // instead of the generic [msgList] observer is what makes upward paging reliable — a spurious
     // update can no longer be mistaken for the page we requested. See [loadOlderPage].
     val topPageResult = Observable(0)
+
+    /**
+     * True when [r] is the gray-tip record announcing a recall ("xx 撤回了一条消息"): a gray tip
+     * whose [GrayTipElement] carries a non-null revoke payload. Used by the anti-recall merge
+     * filter so the notice never renders next to the preserved original message.
+     */
+    fun isRecallGrayTip(r: MsgRecord): Boolean =
+        r.elements?.any { it.grayTipElement?.revokeElement != null } == true
 
     fun getMsgIndex(msg: WatchAIOMsgItem): Int {
         return msgList.value.indexOf(msg)
@@ -381,6 +391,13 @@ object CurrentMsgList {
                     merged.add(item)                               // updated in place
                     mi = j + 1
                 } else if (j == null) {
+                    // Anti-recall: also drop the "xx 撤回了一条消息" gray-tip record itself —
+                    // otherwise it lingers under the preserved original (visible after a local
+                    // delete or a history reload pulls it in).
+                    if (momoi.mod.qqpro.Settings.antiRecall.value && isRecallGrayTip(item.d)) {
+                        Utils.log("MsgList.n: antiRecall dropped recall gray tip msgId=${item.d.msgId}")
+                        continue
+                    }
                     flushMirrorOlderThan(item.d.msgSeq)            // unseen: place by seq
                     merged.add(item)
                 } // else: duplicate msgId already emitted from the mirror — skip

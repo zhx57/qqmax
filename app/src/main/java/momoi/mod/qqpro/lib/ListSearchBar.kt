@@ -100,15 +100,15 @@ fun styleSelectorHeaderIcons(root: View) {
     }.onFailure { Utils.log("styleSelectorHeaderIcons: $it") }
 }
 
-/** A square M3 tonal-filled drawable with a centred group glyph, sized for [WatchAvatarView] rasterisation. */
+/** A square neutral-filled drawable with a centred group glyph, sized for [WatchAvatarView] rasterisation. */
 private fun tonalGroupAvatar(): android.graphics.drawable.Drawable = object : android.graphics.drawable.Drawable() {
     private val size = 48.dp
     private val bg = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        // OPAQUE tonal: this is rasterized into a WatchAvatarView with no live background, so a
-        // translucent M3.TONAL would composite over black and look dark navy in light mode.
-        color = M3.tonalSolid; style = android.graphics.Paint.Style.FILL
+        // Miuix neutral avatar tile: surfaceContainerHigh fill (secondaryVariant). The old
+        // primaryContainer-on-primary glyph combo rendered as loud blue-on-blue.
+        color = M3.surfaceContainerHigh; style = android.graphics.Paint.Style.FILL
     }
-    private val glyph = MaterialSymbol(MaterialSymbols.group, M3.primary, insetFraction = 0.26f)
+    private val glyph = MaterialSymbol(MaterialSymbols.group, M3.onSurface, insetFraction = 0.26f)
     override fun onBoundsChange(b: android.graphics.Rect) { glyph.bounds = b }
     override fun getIntrinsicWidth() = size
     override fun getIntrinsicHeight() = size
