@@ -1312,7 +1312,7 @@ class 设置页 : SettingsActivity() {
     }
 
     /** A rounded MIUIX continuous squircle card row. */
-    private inline fun GroupScopeFix.card(crossinline block: (LinearLayout) -> Unit) {
+    private inline fun GroupScopeFix.card(block: (LinearLayout) -> Unit) {
         val card = add<LinearLayout>()
             .width(FILL)
             .padding(14.dp, 12.dp, 14.dp, 12.dp)
