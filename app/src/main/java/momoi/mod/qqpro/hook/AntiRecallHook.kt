@@ -13,7 +13,7 @@ import java.util.ArrayList
  * deletion/recall, leaving the message intact in the chat view and showing an intercepted notice.
  */
 @Mixin
-class AntiRecallHook : MsgListenerAdapter() {
+abstract class AntiRecallHook : MsgListenerAdapter() {
 
     override fun onMsgRecall(chatType: Int, peerUid: String, msgId: Long) {
         if (Settings.antiRecall.value) {
