@@ -336,15 +336,29 @@ object CurrentMsgList {
             // empty RecyclerView (incoming list size 0 → blank chat) is distinguishable from a
             // render-side problem (non-zero list but cells invisible). peer ties it to the chat.
             Utils.log("MsgList.n: peer=${CurrentContact.peerUid} updateType=$updateType incomingSize=${list.size} mirrorSize=${msg.size} types=[${list.take(8).joinToString(",") { runCatching { "${it.d.msgType}/${it.javaClass.simpleName}" }.getOrElse { "?" } }}]")
+            // Reconcile EVERY incoming item into the accumulated mirror, then render the mirror.
+            //
+            // The previous merge broke out at the FIRST match (newest end) and rendered
+            // incoming-head + mirror-tail. When the kernel pushes a PARTIAL window (status/read
+            // updates that carry only the most recent items, some next-page results), the incoming
+            // head no longer covers the whole mirror, so everything OLDER than the window vanished
+            // from the render — and the truncation was written back into the mirror via
+            // msgList.update(list), making those messages disappear until chat re-entry. That was
+            // the intermittent "some messages are missing until you reopen the chat" bug.
+            //
+            // Newer items may arrive in any batch composition, so: poll newest→oldest; update
+            // matches in place; insert unseen items at the tail (keeping batch order); never break
+            // early. The full mirror is then the authoritative render list.
             var insertIndex = -1
+            // msgId -> mirror index. Built once per push (O(n)); safe to keep across inserts because
+            // unseen items are only ever inserted at the tail region (>= the original size), so all
+            // pre-existing indices stay valid.
+            val indexById = HashMap<Long, Int>(msg.size * 2)
+            msg.forEachIndexed { i, it -> indexById[it.d.msgId] = i }
             while (true) {
-                val last = list.pollLast()
-                if (last == null) {
-                    list.addAll(msg)
-                    break
-                }
-                val index = msg.indexOfLast { last.d.msgId == it.d.msgId }
-                if (index == -1) {
+                val last = list.pollLast() ?: break
+                val index = indexById[last.d.msgId]
+                if (index == null) {
                     if (insertIndex == -1) {
                         msg.add(last)
                         insertIndex = msg.lastIndex
@@ -353,16 +367,10 @@ object CurrentMsgList {
                     }
                 } else {
                     msg[index] = last
-                    //if (insertIndex == -1) {
-                    //    insertIndex = 0
-                    //}
-                    //for (i in insertIndex until msg.size) {
-                    //    msg[i].checkAndSetSameSender(msg.getOrNull(i-1))
-                    //}
-                    list.addAll(msg.subList(index, msg.size))
-                    break
                 }
             }
+            list.clear()
+            list.addAll(msg)
             msgList.update(list.toMutableList())
             Utils.log("MsgList.n: after merge finalSize=${list.size} (handing to native render)")
             // Notify pre-page waiters only for older-history results (bit 0x4), after msgList is

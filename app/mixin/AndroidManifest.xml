@@ -81,12 +81,6 @@
             android:exported="false"
             android:excludeFromRecents="true" />
 
-        <!-- UI-style chooser (Material vs original), shown on first launch and from settings. Main process. -->
-        <activity
-            android:name="momoi.mod.qqpro.StyleChooserActivity"
-            android:exported="false"
-            android:excludeFromRecents="true" />
-
         <!-- 菜单自定义: drag-to-reorder editor for the long-press / attachment menus. Main process. -->
         <activity
             android:name="momoi.mod.qqpro.MenuEditorActivity"

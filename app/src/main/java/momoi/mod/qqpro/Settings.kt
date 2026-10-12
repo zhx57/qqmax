@@ -368,66 +368,21 @@ object Settings {
     // Opt-in escape hatch (owns the call screen rendering); default off. Takes effect next call.
     val materializeCall = BooleanPref("materializeCall", false)
 
-    // ===== 界面风格选择 (StyleChooserActivity) =====
-    // The user's chosen overall UI style, recorded by the 界面风格 chooser screen. 0 = not chosen yet,
-    // 1 = Material design, 2 = Original design. Reserved: kept as a separate signal for possible future
-    // use (e.g. a style-aware default) — picking a style ALSO flips the individual [styleToggles] below.
+    // ===== 界面风格 (MIUIX-only; legacy migration marker) =====
+    // Historically 0 = unchosen, 1 = Material, 2 = Original. The dual-style chooser (and its broken
+    // "original" path, which could no longer open chats) was REMOVED — MIUIX is the only design now.
+    // The pref survives only as a migration marker: on startup, a stale 2 means an old build had
+    // one-shot disabled every [styleToggles] toggle, so 更新检查 re-enables them once and writes 1.
     val uiStyle = IntPref("uiStyle", 0)
-    // Whether the first-launch style chooser has already been shown. Once true the chooser no longer
-    // auto-opens on app start (it stays reachable from settings). Set when a style is picked or the
-    // chooser is dismissed. Not exported (internal flag), so it's left out of [all].
-    val styleChooserSeen = BooleanPref("styleChooserSeen", false)
-    // The toggles the 界面风格 chooser flips together: the whole "Material 化" category, the home-nav
-    // method (mainNavCustom), and contactSections (the 联系人分组 dependency materialContactsList needs).
-    // Material style = every one true; Original style = every one false.
+    // The MIUIX feature toggles the old style chooser flipped together: the whole "MIUIX 风格"
+    // category, the home-nav method (mainNavCustom), and contactSections (the 联系人分组 dependency
+    // materialContactsList needs). Kept for the one-time migration; individual switches in settings
+    // still control each one.
     val styleToggles: List<Pref<Boolean>> get() = listOf(
         materializeChat, materialAttachmentMenu, materialLongPressMenu,
         materialContactsList, materialChatList, materialQZoneBar, materializeQzone,
         useRichProfile, useM3Settings, materializeLogin, contactSections, mainNavCustom,
     )
-
-    // Classic QQ palette written when 原始设计 is picked. The native watch UI is DARK (its list bg is
-    // #1f2025, white text) — which already matches the M3 dark surface defaults — and the only thing
-    // that reads as "Material" is the accent (the M3 default is a soft Material blue #90CAF9). So the
-    // classic look is just the genuine QQ vivid blue accent (#12B7F5, native res "btn_blue") over those
-    // dark surfaces, with white labels on the blue like the native buttons. All other tokens stay blank
-    // → the dark M3-structure defaults. (Earlier "light grey" was wrong: the original is dark grey.)
-    private val classicTheme: List<Pair<StringPref, String>> get() = listOf(
-        themeColor to "#12B7F5",                // QQ vivid blue (native btn_blue / aio accent)
-        themeOnPrimary to "#FFFFFF",            // white label on the blue, matching native buttons
-    )
-
-    /**
-     * Apply the chooser's pick: flip every [styleToggles] pref, record the reserved [uiStyle], and set
-     * the theme palette — Material clears every [themeTokens] override (derive from the Material accent),
-     * Original writes the [classicTheme] (vivid QQ blue + light grey). Persists SYNCHRONOUSLY (commit,
-     * not apply): the caller cold-restarts the process immediately afterwards (Process.killProcess),
-     * which would otherwise drop the still-pending async apply() writes — the original bug where picking
-     * a style changed nothing after restart.
-     */
-    fun applyUiStyle(material: Boolean) {
-        // Keep the in-memory Pref fields consistent for the brief moment before the restart.
-        styleToggles.forEach { it.value = material }
-        uiStyle.value = if (material) 1 else 2
-        styleChooserSeen.value = true
-        // Baseline: clear every theme override; for Original, then write the classic palette on top.
-        themeTokens.forEach { it.value = "" }
-        val theme = if (material) emptyList() else classicTheme
-        theme.forEach { (pref, v) -> pref.value = v }
-        // Chat bubble corner radius (dp): Material = generously rounded; Original = nearly square,
-        // closer to the native QQ bubble.
-        val bubbleRadius = if (material) 18f else 4f
-        bubbleCornerRadius.value = bubbleRadius
-        // Force a synchronous disk write of all the keys so they survive the imminent kill.
-        sp.edit(commit = true) {
-            styleToggles.forEach { putBoolean(it.key, material) }
-            putInt(uiStyle.key, if (material) 1 else 2)
-            putBoolean(styleChooserSeen.key, true)
-            themeTokens.forEach { putString(it.key, "") }
-            theme.forEach { (pref, v) -> putString(pref.key, v) }
-            putFloat(bubbleCornerRadius.key, bubbleRadius)
-        }
-    }
 
     // ===== 翻译 (by AILIFE) =====
     // The long-press "翻译" entry's visibility now lives in 菜单自定义 ([longPressMenuOrder]).

@@ -49,7 +49,6 @@ import momoi.mod.qqpro.lib.material.leadingSymbol
 import momoi.mod.qqpro.lib.material.showColorPicker
 import momoi.mod.qqpro.hook.view.buildAboutView
 import momoi.mod.qqpro.ota.OTAManager2
-import momoi.mod.qqpro.StyleChooserActivity
 import momoi.mod.qqpro.MenuEditorActivity
 import momoi.mod.qqpro.lib.height
 import momoi.mod.qqpro.lib.margin
@@ -416,9 +415,6 @@ class 设置页 : SettingsActivity() {
             }
         },
         SettingsCategory("MIUIX 风格", "MIUIX 视觉重构总开关（关闭则保留原生界面）") {
-            actionCard("界面风格", "在 MIUIX 与 原始 设计之间手动切换(选择后自动重启，不再首次启动时自动弹出)") {
-                startActivity(Intent(this@设置页, StyleChooserActivity::class.java))
-            }
             switch("MIUIX 聊天界面", "聊天输入框、回复/编辑横幅应用 MIUIX 风格(大圆角胶囊输入框、纯白滑块开关、澎湃科技蓝发送键)；关闭则保留原样。需开启“聊天页直接输入”，重进聊天页生效", Settings.materializeChat)
             switch("MIUIX 附件菜单", "附件「+」菜单应用 MIUIX 底部抽屉与彩色磁贴图标；关闭则保留原图标(重进聊天页生效)", Settings.materialAttachmentMenu)
             switch("MIUIX 长按菜单", "消息长按菜单应用 MIUIX 悬浮大圆角卡片与行间细分割线；关闭则用半透明深色行+白色文字", Settings.materialLongPressMenu)

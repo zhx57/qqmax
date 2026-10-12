@@ -35,12 +35,13 @@ class 更新检查 : MainActivity() {
         // until granted. Ask on launch (no-op below API 33 / once already granted).
         NotificationPermission.ensure(this)
         OTAManager2(this).checkUpdate(false)
-        // MIUIX is the only design system now. If a previous version's style chooser was used to pick
-        // "原始设计" (which one-shot turned ALL the MIUIX switches off and persisted it), re-enable every
-        // MIUIX toggle once so the redesign actually applies. The chooser stays reachable from Settings.
+        // MIUIX is the only design system now (the dual-style chooser was removed). A stale
+        // uiStyle==2 means an old build's 原始设计 pick one-shot disabled every MIUIX toggle and
+        // persisted it — re-enable them once so the redesign actually applies after update.
         if (Settings.uiStyle.value == 2) {
             Settings.uiStyle.value = 1
-            runCatching { Settings.applyUiStyle(true) }
+            Settings.styleToggles.forEach { it.value = true }
+            Utils.log("更新检查: legacy uiStyle==2 migration — all MIUIX toggles re-enabled")
         }
     }
 }
