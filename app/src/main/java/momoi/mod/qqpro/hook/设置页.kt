@@ -598,6 +598,7 @@ class 设置页 : SettingsActivity() {
                 { M3.parseColorOrNull(Settings.linkColor.value) ?: M3.primary })
         },
         SettingsCategory("翻译", "消息翻译与发送翻译") {
+            textInput("自定义翻译接口", "留空用内置接口。URL 模板：{q}=编码后原文，{text}=原文，{to}=目标语言代码(如 zh)。返回 JSON(自动提取 translation/translatedText 等字段)或纯文本均可", Settings.customTranslateUrl)
             langSelector("查看语言", "把对方消息翻译成的目标语言", Settings.translateViewLang)
             switch("对方消息原地替换", "翻译对方消息时直接用译文替换原文；关闭(默认)则保留原文，在其下方用分隔线显示译文", Settings.translateReplaceInPlace)
             switch("显示“翻译全部”开关", "在好友/群聊设置页显示“翻译全部消息”开关，可逐会话开启：开启后该会话内所有可见文字消息自动翻译成查看语言(重进设置页生效)", Settings.translateShowAllSwitch)

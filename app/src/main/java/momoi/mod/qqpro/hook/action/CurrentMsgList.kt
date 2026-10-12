@@ -26,6 +26,44 @@ import java.util.LinkedList
 
 object CurrentMsgList {
     /**
+     * Anti-recall vault: caches the PRE-recall [MsgRecord] for every message that flows through
+     * the list merge (per peer, per msgId). The kernel MUTATES the persisted record on recall
+     * (elements get replaced/marked server-side), so after exiting and re-entering a chat the
+     * freshly loaded record no longer carries the original content — only our snapshot does.
+     * In-memory (survives chat re-entry; a full app restart is a legitimate loss). Bounded: at
+     * most [CAP] records overall, oldest evicted first.
+     */
+    object AntiRecallVault {
+        private const val CAP = 400
+        private const val PEER_CAP = 120
+        private val byPeer = HashMap<String, LinkedHashMap<Long, com.tencent.qqnt.kernel.nativeinterface.MsgRecord>>()
+
+        fun put(r: com.tencent.qqnt.kernel.nativeinterface.MsgRecord) {
+            if (r.recallTime > 0L) return // never cache the recalled form
+            val peer = r.peerUid ?: return
+            synchronized(byPeer) {
+                var map = byPeer[peer]
+                if (map == null) {
+                    if (byPeer.size >= 32) byPeer.remove(byPeer.keys.first()) // bound peer count
+                    map = LinkedHashMap()
+                    byPeer[peer] = map
+                }
+                map.remove(r.msgId)
+                map[r.msgId] = r
+                while (map.size > PEER_CAP) map.remove(map.keys.first())
+            }
+        }
+
+        /** The cached pre-recall record for [msgId] in [peerUid], or null. */
+        fun restore(peerUid: String?, msgId: Long): com.tencent.qqnt.kernel.nativeinterface.MsgRecord? {
+            if (peerUid == null) return null
+            return synchronized(byPeer) { byPeer[peerUid]?.get(msgId) }
+        }
+
+        fun clear() = synchronized(byPeer) { byPeer.clear() }
+    }
+
+    /**
      * msgIds the USER deleted locally, with timestamps. Read by [NoEviction]: anti-recall blocks
      * repo-level deletions to preserve peer-recalled messages, but a user's own delete must go
      * through — this registry tells the two apart (a short window covers the async gap between
@@ -394,6 +432,9 @@ object CurrentMsgList {
                 while (mi < msg.size && msg[mi].d.msgSeq < seq) { merged.add(msg[mi]); mi++ }
             }
             for (item in list) {
+                // Cache the PRE-recall record BEFORE the recall branches handle it (per peer, per
+                // msgId). See [AntiRecallVault].
+                AntiRecallVault.put(item.d)
                 val j = indexById[item.d.msgId]
                 if (j != null && j >= mi) {
                     // Anti-recall, peer recalls only: a recall arrives as an update of the ORIGINAL
@@ -414,14 +455,23 @@ object CurrentMsgList {
                     mi = j + 1
                 } else if (j == null) {
                     // Anti-recall on reload: the kernel DB keeps the peer-recalled record (with
-                    // recallTime > 0) — without this, re-entering the chat renders the recalled
-                    // state and the preservation is lost. Clear the flag so the original content
-                    // renders again; the recall gray tip still loads below it as the notice.
+                    // recallTime > 0) — and its original content may already be replaced server-
+                    // side. If we still hold the pre-recall snapshot, substitute the SNAPSHOT
+                    // record for the loaded one so the original renders again; otherwise clear the
+                    // flag as a best-effort fallback. The recall gray tip still loads below it as
+                    // the notice.
                     if (momoi.mod.qqpro.Settings.antiRecall.value &&
                         item.d.recallTime > 0L && item.d.senderUid != SelfContact.peerUid
                     ) {
+                        val snap = AntiRecallVault.restore(item.d.peerUid, item.d.msgId)
+                        if (snap != null) {
+                            Utils.log("MsgList.n: antiRecall restored msgId=${item.d.msgId} from vault on load")
+                            flushMirrorOlderThan(snap.msgSeq)
+                            merged.add(WatchAIOMsgItem(snap))
+                            continue
+                        }
                         item.d.recallTime = 0L
-                        Utils.log("MsgList.n: antiRecall restored peer-recalled msgId=${item.d.msgId} on load")
+                        Utils.log("MsgList.n: antiRecall cleared recall flag of msgId=${item.d.msgId} on load")
                     }
                     flushMirrorOlderThan(item.d.msgSeq)            // unseen: place by seq
                     merged.add(item)

@@ -44,6 +44,10 @@ object Settings {
     val themeOutline = StringPref("themeOutline", "")
     val themeOutlineVariant = StringPref("themeOutlineVariant", "")
     val themeError = StringPref("themeError", "")
+    // Custom translation endpoint URL template (blank = built-in MyMemory). Placeholders:
+    // {q} = URL-encoded text, {text} = raw text, {to} = target language code. The response may be
+    // JSON (common translation fields are searched at any depth) or plain text. Read by Translator.
+    val customTranslateUrl = StringPref("customTranslateUrl", "")
     // Extra Miuix tokens surfaced as overrides (blank = built-in Miuix default; read live by M3).
     val themeDivider = StringPref("themeDivider", "")
     val themeSecondary = StringPref("themeSecondary", "")
@@ -505,7 +509,7 @@ object Settings {
         galleryQuickSend, editSingleImageBeforeSend, useSystemImagePicker, useSystemAudioPicker, confirmOpenLink, wideUrlMatch, parseNumber, parseAtMember, highlightSelfMention, enableLinkPreview,
         picMaxHeightRatio, longScreenshot, bubbleCornerRadius, bubbleColorSelf, bubbleColorOther, textColor, textColorSelf, linkColor, contactSections, materialContactsList, materialChatList, materialQZoneBar, qzoneBarSpread, qzoneInlineVideo, qzoneMiniAppCard, materializeQzone, qzoneTruncatePost, qzoneTruncateImages,
         profileNameMultiline, useRichProfile, useM3Settings, materializeLogin,
-        translateViewLang, translateSendLang, translateShowAllSwitch, translateOwnMessages, translateReplaceInPlace, translateSendButton,
+        translateViewLang, translateSendLang, translateShowAllSwitch, translateOwnMessages, translateReplaceInPlace, translateSendButton, customTranslateUrl,
         summarizeUnreadButton, summarizeStyle, summarizeLang, customAiApiUrl, customAiApiKey, customAiModel, antiRecall,
         multiSelectTimeOrder, multiSelectCopySender,
         screenshotTitlebar, screenshotInputBar, screenshotSelfAsOther, screenshotShowIdentity, screenshotWatermark,
