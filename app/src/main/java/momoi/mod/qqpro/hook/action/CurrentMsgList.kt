@@ -14,8 +14,6 @@ import com.tencent.aio.data.msglist.IMsgItem
 import com.tencent.aio.main.fragment.ChatFragment
 import com.tencent.aio.part.root.panel.content.firstLevel.msglist.mvx.data.MsgListRepo
 import com.tencent.aio.part.root.panel.content.firstLevel.msglist.mvx.intent.MsgListDataIntent
-import com.tencent.qqnt.kernel.nativeinterface.GrayTipElement
-import com.tencent.qqnt.kernel.nativeinterface.MsgRecord
 import com.tencent.watch.aio_impl.coreImpl.repo.WatchMsgListRepo
 import com.tencent.watch.aio_impl.coreImpl.vb.WatchAIOListVB
 import com.tencent.watch.aio_impl.data.WatchAIOMsgItem
@@ -43,14 +41,6 @@ object CurrentMsgList {
     // instead of the generic [msgList] observer is what makes upward paging reliable — a spurious
     // update can no longer be mistaken for the page we requested. See [loadOlderPage].
     val topPageResult = Observable(0)
-
-    /**
-     * True when [r] is the gray-tip record announcing a recall ("xx 撤回了一条消息"): a gray tip
-     * whose [GrayTipElement] carries a non-null revoke payload. Used by the anti-recall merge
-     * filter so the notice never renders next to the preserved original message.
-     */
-    fun isRecallGrayTip(r: MsgRecord): Boolean =
-        r.elements?.any { it.grayTipElement?.revokeElement != null } == true
 
     fun getMsgIndex(msg: WatchAIOMsgItem): Int {
         return msgList.value.indexOf(msg)
@@ -378,26 +368,26 @@ object CurrentMsgList {
             for (item in list) {
                 val j = indexById[item.d.msgId]
                 if (j != null && j >= mi) {
-                    // Anti-recall: a recall arrives as an update of the ORIGINAL record with
-                    // recallTime > 0 (the kernel marks it recalled in place). Skip that update so
-                    // the mirror keeps the pre-recall message content — the row never turns into a
-                    // gray tip and never vanishes. First-seen records with recallTime > 0 (e.g.
-                    // opening a chat whose history already contains an old recall) still load.
-                    if (momoi.mod.qqpro.Settings.antiRecall.value && item.d.recallTime > 0L) {
-                        Utils.log("MsgList.n: antiRecall kept original of recalled msgId=${item.d.msgId}")
+                    // Anti-recall, peer recalls only: a recall arrives as an update of the ORIGINAL
+                    // record with recallTime > 0. When the recalled message was sent by SOMEONE ELSE
+                    // (senderUid != self), skip the update so the mirror keeps the pre-recall
+                    // content — the row stays, and the recall gray tip renders below it. My OWN
+                    // recall (senderUid == self) passes through and disappears normally with its
+                    // standard "你撤回了一条消息" gray tip. First-seen records with recallTime > 0
+                    // (history already containing an old recall) still load.
+                    val peerRecall = momoi.mod.qqpro.Settings.antiRecall.value &&
+                        item.d.recallTime > 0L && item.d.senderUid != SelfContact.peerUid
+                    if (peerRecall) {
+                        Utils.log("MsgList.n: antiRecall kept original of peer-recalled msgId=${item.d.msgId}")
                         continue
                     }
                     while (mi < j) { merged.add(msg[mi]); mi++ }   // mirror-only items before it
                     merged.add(item)                               // updated in place
                     mi = j + 1
                 } else if (j == null) {
-                    // Anti-recall: also drop the "xx 撤回了一条消息" gray-tip record itself —
-                    // otherwise it lingers under the preserved original (visible after a local
-                    // delete or a history reload pulls it in).
-                    if (momoi.mod.qqpro.Settings.antiRecall.value && isRecallGrayTip(item.d)) {
-                        Utils.log("MsgList.n: antiRecall dropped recall gray tip msgId=${item.d.msgId}")
-                        continue
-                    }
+                    // Recall gray tips ("你/对方 撤回了一条消息") now render for BOTH sides: my own
+                    // recall vanishes with its standard notice; a peer recall keeps the preserved
+                    // original with the notice underneath.
                     flushMirrorOlderThan(item.d.msgSeq)            // unseen: place by seq
                     merged.add(item)
                 } // else: duplicate msgId already emitted from the mirror — skip
