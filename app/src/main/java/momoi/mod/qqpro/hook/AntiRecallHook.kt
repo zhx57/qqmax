@@ -15,7 +15,7 @@ import java.util.ArrayList
 @Mixin
 class AntiRecallHook : MsgListenerAdapter() {
 
-    override fun onMsgRecall(chatType: Int, peerUid: String?, msgId: Long) {
+    override fun onMsgRecall(chatType: Int, peerUid: String, msgId: Long) {
         if (Settings.antiRecall.value) {
             Utils.log("AntiRecall: blocked onMsgRecall for msgId=$msgId in chat=$peerUid")
             Utils.toast(Utils.application, "对方尝试撤回一条消息（已拦截）")
@@ -24,9 +24,9 @@ class AntiRecallHook : MsgListenerAdapter() {
         super.onMsgRecall(chatType, peerUid, msgId)
     }
 
-    override fun onMsgDelete(contact: Contact?, msgIds: ArrayList<Long>?) {
+    override fun onMsgDelete(contact: Contact, msgIds: ArrayList<Long>) {
         if (Settings.antiRecall.value) {
-            Utils.log("AntiRecall: blocked onMsgDelete for msgIds=${msgIds?.size}")
+            Utils.log("AntiRecall: blocked onMsgDelete for msgIds=${msgIds.size}")
             return
         }
         super.onMsgDelete(contact, msgIds)
