@@ -167,11 +167,14 @@ object M3 {
     val onTertiaryContainer: Int get() = dl(0xFF_4788FF.toInt(), 0xFF_3482FF.toInt())
 
     // ── Surfaces (Miuix background/surface/surfaceContainer semantics) ──────────
-    // Miuix: background = page canvas (white / #242424); surface = plain surface & floats
-    // (#F7F7F7 / black); surfaceContainer = Card fill (white / #242424). In this app [surface] is
-    // the page canvas, so it maps to Miuix `background`; cards use [surfaceContainer].
-    val surface: Int get() = tok(momoi.mod.qqpro.Settings.themeSurface.value, SysRole.SURFACE, dl(0xFF_242424.toInt(), 0xFF_FFFFFF.toInt()))          // page canvas (Miuix background)
-    val surfaceFloat: Int get() = dl(0xFF_000000.toInt(), 0xFF_F7F7F7.toInt())        // bars / simple floats (Miuix surface)
+    // Miuix: surface = page canvas & chrome (#F7F7F7 light / Black dark — the HyperOS look);
+    // background = dialog card fill (white / #242424); surfaceContainer = Card fill
+    // (white / #242424 — floats above the canvas). [surface] here is the page canvas, mapping
+    // to Miuix `surface`; dialogs/floats use [dialogBackground] (Miuix `background`).
+    val surface: Int get() = tok(momoi.mod.qqpro.Settings.themeSurface.value, SysRole.SURFACE, dl(0xFF_000000.toInt(), 0xFF_F7F7F7.toInt()))          // page canvas (Miuix surface)
+    /** Miuix background: white (light) / #242424 (dark) — dialog & overlay fill. */
+    val dialogBackground: Int get() = dl(0xFF_242424.toInt(), 0xFF_FFFFFF.toInt())
+    val surfaceFloat: Int get() = surface                                        // legacy alias, same role
     val surfaceContainer: Int get() = tok(momoi.mod.qqpro.Settings.themeSurfaceContainer.value, SysRole.SURFACE_CONTAINER, dl(0xFF_242424.toInt(), 0xFF_FFFFFF.toInt()))     // card container
     val surfaceContainerHigh: Int get() = tok(momoi.mod.qqpro.Settings.themeSurfaceContainerHigh.value, SysRole.SURFACE_CONTAINER_HIGH, dl(0xFF_434343.toInt(), 0xFF_F0F0F0.toInt())) // raised card / secondary button fill
     val surfaceContainerHighest: Int get() = dl(0xFF_2D2D2D.toInt(), 0xFF_E8E8E8.toInt())
