@@ -50,7 +50,7 @@ class M3Dialog(ctx: Context) : ScrollView(ctx) {
 
     init {
         isFillViewport = true
-        setBackgroundColor(M3.surface)
+        setBackgroundColor(M3.dialogBackground)  // Miuix DialogDefaults: background role (white light / #242424 dark)
         root.addView(titleView, LinearLayout.LayoutParams(FILL, WRAP))
         addView(root, LayoutParams(FILL, WRAP))
     }
