@@ -459,6 +459,11 @@ object Settings {
     // use (see Summarizer.userId) and persisted; blank means not yet generated.
     val installUuid = StringPref("installUuid", "")
 
+    // OpenAI-compatible API settings for AI chat summarization
+    val aiApiUrl = StringPref("aiApiUrl", "")
+    val aiApiKey = StringPref("aiApiKey", "")
+    val aiModel = StringPref("aiModel", "gpt-4o-mini")
+
     // ===== 聊天截图 (by AILIFE) =====
     // The "截图" entry's visibility now lives in 菜单自定义 ([longPressMenuOrder]). The options below
     // tune how the rendered screenshot looks.

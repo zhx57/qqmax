@@ -184,7 +184,7 @@ class 设置页 : SettingsActivity() {
             // Grouped Categories in MIUIX Cards
             val categories = buildCategories()
             val groups = listOf(
-                "个性与界面" to categories.filter { it.title in listOf("外观主题", "Material 化", "菜单自定义") },
+                "个性与界面" to categories.filter { it.title in listOf("外观主题", "MIUIX 风格", "菜单自定义") },
                 "聊天与会话" to categories.filter { it.title in listOf("聊天输入", "聊天显示", "群聊头像", "标题栏与未读", "主页导航") },
                 "扩展与系统" to categories.filter { it.title in listOf("关于与更新", "调试") }
             )
@@ -410,20 +410,20 @@ class 设置页 : SettingsActivity() {
                 showCategoryList()
             }
         },
-        SettingsCategory("Material 化", "界面 Material 风格重设计开关") {
-            actionCard("界面风格", "在 Material 与 原始 设计之间一键切换(选择后自动重启)") {
+        SettingsCategory("MIUIX 风格", "界面澎湃与MIUIX风格重设计开关") {
+            actionCard("界面风格", "在 MIUIX 与 原始 设计之间一键切换(选择后自动重启)") {
                 startActivity(Intent(this@设置页, StyleChooserActivity::class.java))
             }
-            switch("Material 聊天界面", "聊天输入框、回复/编辑横幅、消息发送中转圈应用 Material 风格(表面填充输入框、M3 符号图标、主题色发送键、M3 转圈)；关闭则保留原样。需开启“聊天页直接输入”，重进聊天页生效", Settings.materializeChat)
-            switch("Material 附件菜单", "附件「+」菜单应用 Material 风格：M3 符号图标(主题色)、表面卡片与涟漪，与长按菜单一致；关闭则保留原图标(重进聊天页生效)", Settings.materialAttachmentMenu)
-            switch("Material 长按菜单", "消息长按菜单应用 Material 风格(表面卡片+主题色)；关闭则用半透明深色行+白色文字", Settings.materialLongPressMenu)
-            switch("Material 联系人页", "联系人页应用 Material 风格：顶栏含搜索/加好友/通知按钮，需同时开启「联系人分组」", Settings.materialContactsList)
-            switch("Material 消息列表", "消息列表(会话列表，第1页)应用 Material 风格：深色背景、表面卡片行、M3 文字颜色(名称/时间/预览)、置顶图标改为 Material 图章、会话长按菜单改为 Material 列表(重进消息页生效)", Settings.materialChatList)
-            switch("Material 动态页顶栏", "动态页(第3页)应用 Material 顶栏：把发布/通知/我的空间三个条目替换为紧凑图标按钮", Settings.materialQZoneBar)
-            switch("完全重做空间(实验)", "用全新 Material 3 界面从头重做整个空间(QQ空间)前端：动态卡片(主页第3页与个人空间)、个人空间资料头部、评论/回复独立页(底部 M3 输入框可打字或语音)、以及发表说说改为单页直接输入。关闭则保留原生界面(仅上面的顶栏/点赞/小程序等就地微调)。默认关闭(重进空间生效)", Settings.materializeQzone)
-            switch("使用增强资料卡", "用全新 Material 风格资料卡替换原资料页，额外显示年龄/生日/星座/地区/签名(从内核获取)，关闭则保留原页面(重进资料页生效)", Settings.useRichProfile)
-            switch("Material 设置页面", "把自我页(主页第4页)、好友/群聊设置页重绘为全新 Material 风格(头部卡片+M3列表+主题色开关)，并把改群名/备注/昵称改为 Material 输入弹窗，不再打开全屏键盘页(重进对应页面生效)", Settings.useM3Settings)
-            switch("Material 登录页", "把扫码登录页重绘为全新 Material 风格(QQ Max 品牌+应用图标、加框二维码、M3 状态提示、扫码确认后显示登录账号头像与号码、刷新/手机号登录按钮)，并跳过首次启动的隐私协议确认页。原生登录逻辑不变(下次登录生效)", Settings.materializeLogin)
+            switch("MIUIX 聊天界面", "聊天输入框、回复/编辑横幅、消息发送中转圈应用 MIUIX 风格(表面填充输入框、主题色发送键、圆润胶囊)；关闭则保留原样。需开启“聊天页直接输入”，重进聊天页生效", Settings.materializeChat)
+            switch("MIUIX 附件菜单", "附件「+」菜单应用 MIUIX 风格：彩色 Squircle 磁贴图标、悬浮大圆角抽屉与触压反馈；关闭则保留原图标(重进聊天页生效)", Settings.materialAttachmentMenu)
+            switch("MIUIX 长按菜单", "消息长按菜单应用 MIUIX 风格(22dp 大圆角卡片+触感缩放)；关闭则用半透明深色行+白色文字", Settings.materialLongPressMenu)
+            switch("MIUIX 联系人页", "联系人页应用 MIUIX 风格：顶栏含搜索/加好友/通知按钮，需同时开启「联系人分组」", Settings.materialContactsList)
+            switch("MIUIX 消息列表", "消息列表(会话列表，第1页)应用 MIUIX 风格：纯黑/浅灰底色、悬浮卡片行、清晰字体、置顶图章、长按菜单(重进消息页生效)", Settings.materialChatList)
+            switch("MIUIX 动态页顶栏", "动态页(第3页)应用 MIUIX 顶栏：把发布/通知/我的空间三个条目替换为紧凑图标按钮", Settings.materialQZoneBar)
+            switch("MIUIX 空间重做", "用全新 MIUIX / 澎湃风格从头重做整个空间前端：动态卡片、个人空间资料头部、评论回复独立页以及发表说说直接输入。关闭则保留原生界面。默认关闭(重进空间生效)", Settings.materializeQzone)
+            switch("MIUIX 资料卡", "用全新 MIUIX 风格资料卡替换原资料页，额外显示年龄/生日/星座/地区/签名(从内核获取)，关闭则保留原页面(重进资料页生效)", Settings.useRichProfile)
+            switch("MIUIX 设置页面", "把自我页(主页第4页)、好友/群聊设置页重绘为全新 MIUIX 风格(头部大卡片+分组卡片+MIUIX开关)，并把改群名/备注/昵称改为圆角输入弹窗(重进对应页面生效)", Settings.useM3Settings)
+            switch("MIUIX 登录页", "把扫码登录页重绘为全新 MIUIX 风格(QQ Max 品牌+应用图标、加框二维码、MIUI 状态提示)，并跳过首次启动隐私协议确认页(下次登录生效)", Settings.materializeLogin)
         },
         SettingsCategory("菜单自定义", "长按菜单与附件菜单的排序与显示") {
             section("自定义菜单", "拖动左侧手柄排序；拖到分隔线下方的项目将不再显示。例如可隐藏“翻译/截图/总结/多选”等。")
@@ -617,6 +617,10 @@ class 设置页 : SettingsActivity() {
             switch("总结未读消息", "未读超过 20 条时，在“↑X条新消息”气泡下方显示“总结未读”按钮，从第一条未读总结到末尾", Settings.summarizeUnreadButton)
             selector("总结风格", "要点(Markdown列表)/一句话/详细", Settings.summarizeStyle, listOf("要点", "一句话", "详细"))
             summarizeLangSelector("总结语言", "总结输出的语言；自动=跟随会话本身的语言。过往总结记录可在好友/群聊设置页的“总结历史”查看")
+            section("OpenAI 兼容接口设置", "支持任何 OpenAI 兼容的第三方大模型 API (DeepSeek/Ollama 等)。留空则使用内置端点。")
+            textInput("接口地址 (Base URL)", "例如 https://api.openai.com/v1 或 https://api.deepseek.com", Settings.aiApiUrl)
+            textInput("API Key", "你的 API 密钥 (留空无鉴权)", Settings.aiApiKey)
+            textInput("模型名称 (Model)", "例如 gpt-4o-mini 或 deepseek-chat", Settings.aiModel)
         },
         SettingsCategory("关于与更新", "版本更新") {
             switch("自动检查更新", "启动时检查 QQ Max 新版本，可在关于页手动检查", Settings.autoUpdateCheck)

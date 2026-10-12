@@ -248,12 +248,8 @@ class BubbleTextView(context: Context) : TextView(context) {
         val farFromBottom = dist != DIST_UNKNOWN && dist > SCROLL_DIST_THRESHOLD
         // Reaching the newest drops the post-jump force-show (don't clear on UNKNOWN — that's transient).
         if (dist != DIST_UNKNOWN && dist <= SCROLL_DIST_THRESHOLD) forceShow = false
-        // Only the active bubble shows from anchors/distance/force. Unread is native-authoritative (it only
-        // ever sets the count on the visible chat's bubble), so it's allowed through ungated. With no anchor
-        // and no force-show, the direction gate (show on downward scroll, hide on upward) keeps the button
-        // from blocking the screen while reading history.
-        val show = unread ||
-            (active && farFromBottom && (anchors.isNotEmpty() || forceShow || lastScrollDir > 0))
+        // Whenever the user is away from the bottom, keep the go-to-bottom button accessible.
+        val show = unread || (active && farFromBottom)
         val mode = when {
             !show -> Mode.HIDDEN
             unread -> Mode.COLORED

@@ -57,19 +57,14 @@ class MenuPanelLayout(p0: (Int) -> Unit, p1: Boolean) : MenuFrame(p0, p1) {
         if (list != null) {
             list.layoutManager = GridLayoutManager(list.context, 1)
             list.clipToPadding = false
-            // MIUIX Bottom Sheet / Floating Card container
-            list.background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(M3.surfaceContainer)
-                cornerRadius = M3.radiusLg + 4.dp // 24dp smooth corners
-                setStroke(1.dp, M3.outline)
-            }
-            list.clipToOutline = true
-            list.setPadding(0, 10.dp, 0, 10.dp)
+            // Transparent background to avoid double-nested card inside AttachmentOverlay
+            list.background = null
+            list.setPadding(0, 4.dp, 0, 4.dp)
             list.layoutParams = android.widget.FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER,
-            ).apply { val m = 12.dp; setMargins(m, m, m, m) }
+            )
         }
-        Utils.log("MenuPanelLayout: switched to MIUIX styled vertical list")
+        Utils.log("MenuPanelLayout: switched to single-layer MIUIX vertical list")
         return root
     }
 

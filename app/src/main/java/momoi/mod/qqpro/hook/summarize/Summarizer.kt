@@ -67,6 +67,10 @@ object Summarizer {
     ) {
         if (messages.isEmpty()) { listener.onError("没有可总结的消息", false); return }
         thread {
+            if (Settings.aiApiUrl.value.isNotBlank() || Settings.aiApiKey.value.isNotBlank()) {
+                callOpenAI(messages, style, language, listener)
+                return@thread
+            }
             var conn: HttpURLConnection? = null
             try {
                 val body = JSONObject().apply {
@@ -118,6 +122,89 @@ object Summarizer {
             } finally {
                 conn?.disconnect()
             }
+        }
+    }
+
+    private fun callOpenAI(messages: List<Msg>, style: Int, language: String, listener: Listener) {
+        var conn: HttpURLConnection? = null
+        try {
+            val rawUrl = Settings.aiApiUrl.value.trim().ifEmpty { "https://api.openai.com/v1" }
+            val urlString = if (rawUrl.endsWith("/chat/completions")) rawUrl else rawUrl.trimEnd('/') + "/chat/completions"
+            val apiKey = Settings.aiApiKey.value.trim()
+            val modelName = Settings.aiModel.value.trim().ifEmpty { "gpt-4o-mini" }
+
+            val systemPrompt = buildString {
+                append("你是一个精炼、高效的聊天记录总结助手。")
+                when (style) {
+                    1 -> append("请用一句话高度概括这段聊天的核心信息。")
+                    2 -> append("请详细总结这段聊天的背景、讨论要点、达成的共识及待办事项。")
+                    else -> append("请用 Markdown 要点列表列出这段聊天的关键信息。")
+                }
+                if (language.isNotBlank() && language != "auto") {
+                    append("输出语言必须为：$language。")
+                }
+            }
+
+            val userContent = messages.joinToString("\n") { "${it.sender}: ${it.text}" }
+
+            val requestBody = JSONObject().apply {
+                put("model", modelName)
+                put("stream", true)
+                put("messages", JSONArray().apply {
+                    put(JSONObject().apply { put("role", "system"); put("content", systemPrompt) })
+                    put(JSONObject().apply { put("role", "user"); put("content", userContent) })
+                })
+            }.toString()
+
+            conn = (URL(urlString).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 15000
+                readTimeout = 60000
+                doOutput = true
+                if (apiKey.isNotEmpty()) {
+                    setRequestProperty("Authorization", "Bearer $apiKey")
+                }
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Accept", "text/event-stream")
+            }
+            conn.outputStream.use { it.write(requestBody.toByteArray(Charsets.UTF_8)) }
+
+            val code = conn.responseCode
+            if (code != HttpURLConnection.HTTP_OK) {
+                val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                Utils.log("OpenAI API HTTP $code: $err")
+                val errMsg = runCatching { JSONObject(err).optJSONObject("error")?.optString("message", "") }
+                    .getOrNull()?.takeIf { it.isNotEmpty() } ?: "API 调用失败 (HTTP $code)"
+                listener.onError(errMsg, true)
+                return
+            }
+
+            BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8)).use { reader ->
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val payload = line.substring(5).trim()
+                    if (payload == "[DONE]") break
+                    if (payload.isEmpty()) continue
+                    runCatching {
+                        val obj = JSONObject(payload)
+                        val choices = obj.optJSONArray("choices")
+                        if (choices != null && choices.length() > 0) {
+                            val delta = choices.getJSONObject(0).optJSONObject("delta")
+                            val content = delta?.optString("content", "") ?: ""
+                            if (content.isNotEmpty()) {
+                                listener.onChunk(content)
+                            }
+                        }
+                    }
+                }
+            }
+            listener.onDone(-1, -1)
+        } catch (e: Exception) {
+            Utils.log("Summarizer OpenAI error: ${e.message}")
+            listener.onError("请求失败: ${e.message}", true)
+        } finally {
+            conn?.disconnect()
         }
     }
 
