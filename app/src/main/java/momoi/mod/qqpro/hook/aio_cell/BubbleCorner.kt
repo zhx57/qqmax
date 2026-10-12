@@ -58,11 +58,7 @@ object BubbleCorner {
         // 气泡颜色 settings preview shows (other→surfaceContainer, self→primary) so chat matches it.
         val color = resolvedBubbleColor(loc)
         val r = Settings.bubbleCornerRadius.value.dpf
-        wrapper.background = GradientDrawable().apply {
-            setColor(color)
-            cornerRadius = r
-            if (loc == 0) setStroke(1, M3.outline)
-        }
+        wrapper.background = roundCornerDrawable(color, r)
         // Keep the original text inset and add ~half the radius horizontally so glyphs near
         // the corners aren't clipped by the rounded edge.
         val extra = (r * 0.5f).toInt()

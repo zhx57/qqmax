@@ -195,11 +195,11 @@ private fun mirrorSwitch(m3: M3Switch, native: CompoundButton) {
     })
 }
 
-/** An empty MIUIX surface card to hold list rows. */
+/** An empty M3 surface card to hold list rows. */
 private fun newListCard(ctx: Context): M3Card = M3Card(ctx).contentPadding(4.dp).apply {
     clipToOutline = true  // clip row ripples/dividers to the card's rounded corners
     layoutParams = LinearLayout.LayoutParams(FILL, WRAP).apply {
-        marginStart = 8.dp; marginEnd = 8.dp; topMargin = 6.dp; bottomMargin = 8.dp
+        marginStart = 4.dp; marginEnd = 4.dp; topMargin = 4.dp; bottomMargin = 4.dp
     }
 }
 

@@ -458,11 +458,12 @@ object Settings {
     // Stable per-install UUID for the summarization daily quota (X-User-ID). Generated lazily on first
     // use (see Summarizer.userId) and persisted; blank means not yet generated.
     val installUuid = StringPref("installUuid", "")
-
-    // OpenAI-compatible API settings for AI chat summarization
-    val aiApiUrl = StringPref("aiApiUrl", "")
-    val aiApiKey = StringPref("aiApiKey", "")
-    val aiModel = StringPref("aiModel", "gpt-4o-mini")
+    // Custom OpenAI compatible endpoint URL (e.g. https://api.openai.com/v1/chat/completions)
+    val customAiApiUrl = StringPref("customAiApiUrl", "")
+    // Custom API Key for OpenAI compatible endpoint
+    val customAiApiKey = StringPref("customAiApiKey", "")
+    // Custom model name (default gpt-4o-mini)
+    val customAiModel = StringPref("customAiModel", "gpt-4o-mini")
 
     // ===== 聊天截图 (by AILIFE) =====
     // The "截图" entry's visibility now lives in 菜单自定义 ([longPressMenuOrder]). The options below
@@ -546,6 +547,7 @@ object Settings {
         picMaxHeightRatio, longScreenshot, bubbleCornerRadius, bubbleColorSelf, bubbleColorOther, textColor, textColorSelf, linkColor, contactSections, materialContactsList, materialChatList, materialQZoneBar, qzoneBarSpread, qzoneInlineVideo, qzoneMiniAppCard, materializeQzone, qzoneTruncatePost, qzoneTruncateImages,
         profileNameMultiline, useRichProfile, useM3Settings, materializeLogin,
         translateViewLang, translateSendLang, translateShowAllSwitch, translateOwnMessages, translateReplaceInPlace, translateSendButton,
+        summarizeUnreadButton, summarizeStyle, summarizeLang, customAiApiUrl, customAiApiKey, customAiModel, antiRecall,
         multiSelectTimeOrder, multiSelectCopySender,
         screenshotTitlebar, screenshotInputBar, screenshotSelfAsOther, screenshotShowIdentity, screenshotWatermark,
         callNotifyFix, callFullScreenIntent, callBluetoothRoute, callCameralessVideo, materializeCall,

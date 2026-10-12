@@ -234,6 +234,21 @@ class BubbleTextView(context: Context) : TextView(context) {
         if (anchors.size != before) Utils.log("BubbleTextView.pruneAnchors: $before -> ${anchors.size} first=$firstVisible last=$lastVisible")
     }
 
+    private fun isFarFromBottom(): Boolean {
+        val r = rv() ?: return false
+        val lm = lm()
+        if (lm != null) {
+            val lastVisible = lm.findLastVisibleItemPosition()
+            val total = lm.itemCount
+            if (lastVisible >= 0 && total > 0 && (total - 1 - lastVisible) > SCROLL_DIST_THRESHOLD) {
+                return true
+            }
+        }
+        val dist = distanceToLast()
+        if (dist != DIST_UNKNOWN && dist > SCROLL_DIST_THRESHOLD) return true
+        return r.canScrollVertically(1)
+    }
+
     /**
      * Recompute the mode and apply it. Called on every scroll AND layout pass, so it MUST be cheap and
      * idempotent: appearance is only touched on an actual mode change, else re-styling every layout would
@@ -245,10 +260,10 @@ class BubbleTextView(context: Context) : TextView(context) {
         val dist = distanceToLast()
         val active = resolvedRv != null
         val unread = hasUnread()
-        val farFromBottom = dist != DIST_UNKNOWN && dist > SCROLL_DIST_THRESHOLD
+        val farFromBottom = isFarFromBottom()
         // Reaching the newest drops the post-jump force-show (don't clear on UNKNOWN — that's transient).
         if (dist != DIST_UNKNOWN && dist <= SCROLL_DIST_THRESHOLD) forceShow = false
-        // Whenever the user is away from the bottom, keep the go-to-bottom button accessible.
+        // Keep the jump-to-bottom button accessible whenever the user is away from the bottom (both group and DM).
         val show = unread || (active && farFromBottom)
         val mode = when {
             !show -> Mode.HIDDEN

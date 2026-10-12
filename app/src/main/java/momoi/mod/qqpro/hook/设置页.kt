@@ -184,7 +184,7 @@ class 设置页 : SettingsActivity() {
             // Grouped Categories in MIUIX Cards
             val categories = buildCategories()
             val groups = listOf(
-                "个性与界面" to categories.filter { it.title in listOf("外观主题", "MIUIX 风格", "菜单自定义") },
+                "个性与界面" to categories.filter { it.title in listOf("外观主题", "Material 化", "菜单自定义") },
                 "聊天与会话" to categories.filter { it.title in listOf("聊天输入", "聊天显示", "群聊头像", "标题栏与未读", "主页导航") },
                 "扩展与系统" to categories.filter { it.title in listOf("关于与更新", "调试") }
             )
@@ -381,14 +381,14 @@ class 设置页 : SettingsActivity() {
 
     /** The full settings tree, grouped into categories for the two-level navigation. */
     private fun buildCategories(): List<SettingsCategory> = listOf(
-        SettingsCategory("外观主题", "Material 颜色 (M3)") {
+        SettingsCategory("外观主题", "MIUIX 配色与色彩系统") {
             val note = "重进页面生效"
-            selector("外观模式", "Material 配色的明暗基调；浅色采用 M3 推荐的浅色基线配色，$note",
+            selector("外观模式", "MIUIX 配色的明暗基调；深色采用纯黑 OLED 沉浸，浅色采用澎湃冷灰基线，$note",
                 listOf("深色", "浅色"),
                 current = { if (Settings.lightMode.value) 1 else 0 }) { which ->
                 Settings.lightMode.value = which == 1
             }
-            switch("跟随系统主题色", "在支持 Material You 动态取色的设备(Android 12 / API 31 及以上)上，未单独设置的颜色自动取用系统壁纸配色(按明暗基调映射)；单独设置的颜色仍优先。旧系统(多数手表)无动态取色则用内置配色。$note", Settings.followSystemTheme)
+            switch("跟随系统主题色", "在支持动态取色的设备(Android 12 / API 31 及以上)上，未单独设置的颜色自动取用系统壁纸配色(按明暗基调映射)；单独设置的颜色仍优先。旧系统(多数手表)无动态取色则用内置配色。$note", Settings.followSystemTheme)
             colorPicker("主题色 Primary", "主强调色：按钮/开关/链接/高亮；跟随系统时留空自动取系统色", Settings.themeColor, MaterialColors.ACCENT, { M3.primary }, note)
             colorPicker("主色前景 On Primary", "强调色上的文字/图标，留空自动", Settings.themeOnPrimary, MaterialColors.ON, { M3.onPrimary }, note)
             colorPicker("主色容器 Primary Container", "次级强调表面，留空由主题色生成", Settings.themePrimaryContainer, MaterialColors.ACCENT, { M3.primaryContainer }, note)
@@ -404,26 +404,26 @@ class 设置页 : SettingsActivity() {
             colorPicker("描边 Outline", "边框/分隔线", Settings.themeOutline, MaterialColors.ON, { M3.outline }, note)
             colorPicker("描边变体 Outline Variant", "次级边框", Settings.themeOutlineVariant, MaterialColors.SURFACE, { M3.outlineVariant }, note)
             colorPicker("错误色 Error", "错误/危险操作/未读红标", Settings.themeError, MaterialColors.ERROR, { M3.error }, note)
-            actionCard("恢复默认配色", "清除以上所有自定义颜色，恢复内置 M3 配色") {
+            actionCard("恢复默认配色", "清除以上所有自定义颜色，恢复内置 MIUIX 官方配色") {
                 Settings.themeTokens.forEach { it.value = "" }
                 Utils.toast(this@设置页, "已恢复默认配色，重进页面生效")
                 showCategoryList()
             }
         },
-        SettingsCategory("MIUIX 风格", "界面澎湃与MIUIX风格重设计开关") {
+        SettingsCategory("MIUIX 风格", "MIUIX / 澎湃视觉重构总开关") {
             actionCard("界面风格", "在 MIUIX 与 原始 设计之间一键切换(选择后自动重启)") {
                 startActivity(Intent(this@设置页, StyleChooserActivity::class.java))
             }
-            switch("MIUIX 聊天界面", "聊天输入框、回复/编辑横幅、消息发送中转圈应用 MIUIX 风格(表面填充输入框、主题色发送键、圆润胶囊)；关闭则保留原样。需开启“聊天页直接输入”，重进聊天页生效", Settings.materializeChat)
-            switch("MIUIX 附件菜单", "附件「+」菜单应用 MIUIX 风格：彩色 Squircle 磁贴图标、悬浮大圆角抽屉与触压反馈；关闭则保留原图标(重进聊天页生效)", Settings.materialAttachmentMenu)
-            switch("MIUIX 长按菜单", "消息长按菜单应用 MIUIX 风格(22dp 大圆角卡片+触感缩放)；关闭则用半透明深色行+白色文字", Settings.materialLongPressMenu)
+            switch("MIUIX 聊天界面", "聊天输入框、回复/编辑横幅应用 MIUIX 风格(大圆角胶囊输入框、纯白滑块开关、澎湃科技蓝发送键)；关闭则保留原样。需开启“聊天页直接输入”，重进聊天页生效", Settings.materializeChat)
+            switch("MIUIX 附件菜单", "附件「+」菜单应用 MIUIX 底部抽屉与彩色磁贴图标；关闭则保留原图标(重进聊天页生效)", Settings.materialAttachmentMenu)
+            switch("MIUIX 长按菜单", "消息长按菜单应用 MIUIX 悬浮大圆角卡片与行间细分割线；关闭则用半透明深色行+白色文字", Settings.materialLongPressMenu)
             switch("MIUIX 联系人页", "联系人页应用 MIUIX 风格：顶栏含搜索/加好友/通知按钮，需同时开启「联系人分组」", Settings.materialContactsList)
-            switch("MIUIX 消息列表", "消息列表(会话列表，第1页)应用 MIUIX 风格：纯黑/浅灰底色、悬浮卡片行、清晰字体、置顶图章、长按菜单(重进消息页生效)", Settings.materialChatList)
+            switch("MIUIX 消息列表", "消息列表(会话列表，第1页)应用 MIUIX 风格：深沉底色、大圆角卡片行、MIUIX 文字色阶、置顶图标改为磁贴图章(重进消息页生效)", Settings.materialChatList)
             switch("MIUIX 动态页顶栏", "动态页(第3页)应用 MIUIX 顶栏：把发布/通知/我的空间三个条目替换为紧凑图标按钮", Settings.materialQZoneBar)
-            switch("MIUIX 空间重做", "用全新 MIUIX / 澎湃风格从头重做整个空间前端：动态卡片、个人空间资料头部、评论回复独立页以及发表说说直接输入。关闭则保留原生界面。默认关闭(重进空间生效)", Settings.materializeQzone)
-            switch("MIUIX 资料卡", "用全新 MIUIX 风格资料卡替换原资料页，额外显示年龄/生日/星座/地区/签名(从内核获取)，关闭则保留原页面(重进资料页生效)", Settings.useRichProfile)
-            switch("MIUIX 设置页面", "把自我页(主页第4页)、好友/群聊设置页重绘为全新 MIUIX 风格(头部大卡片+分组卡片+MIUIX开关)，并把改群名/备注/昵称改为圆角输入弹窗(重进对应页面生效)", Settings.useM3Settings)
-            switch("MIUIX 登录页", "把扫码登录页重绘为全新 MIUIX 风格(QQ Max 品牌+应用图标、加框二维码、MIUI 状态提示)，并跳过首次启动隐私协议确认页(下次登录生效)", Settings.materializeLogin)
+            switch("完全重做空间", "用全新 MIUIX 界面从头重做整个空间前端：动态卡片(主页第3页与个人空间)、个人空间资料头部、评论回复页(底部大圆角输入框可打字或语音)以及发表说说(重进空间生效)", Settings.materializeQzone)
+            switch("MIUIX 增强资料卡", "用全新 MIUIX 风格资料卡替换原资料页，额外显示年龄/生日/星座/地区/签名(从内核获取)，关闭则保留原页面(重进资料页生效)", Settings.useRichProfile)
+            switch("MIUIX 设置页面", "把自我页(主页第4页)、好友/群聊设置页重绘为全新 MIUIX 风格(头部大圆角卡片+分组列表+澎湃蓝开关)，并把改群名/备注/昵称改为 MIUIX 输入弹窗(重进对应页面生效)", Settings.useM3Settings)
+            switch("MIUIX 登录页", "把扫码登录页重绘为全新 MIUIX 风格(大圆角加框二维码、澎湃科技蓝状态提示、扫码确认后显示登录账号头像与号码、刷新/手机号登录按钮)，并跳过首次启动的隐私协议确认页(下次登录生效)", Settings.materializeLogin)
         },
         SettingsCategory("菜单自定义", "长按菜单与附件菜单的排序与显示") {
             section("自定义菜单", "拖动左侧手柄排序；拖到分隔线下方的项目将不再显示。例如可隐藏“翻译/截图/总结/多选”等。")
@@ -617,10 +617,10 @@ class 设置页 : SettingsActivity() {
             switch("总结未读消息", "未读超过 20 条时，在“↑X条新消息”气泡下方显示“总结未读”按钮，从第一条未读总结到末尾", Settings.summarizeUnreadButton)
             selector("总结风格", "要点(Markdown列表)/一句话/详细", Settings.summarizeStyle, listOf("要点", "一句话", "详细"))
             summarizeLangSelector("总结语言", "总结输出的语言；自动=跟随会话本身的语言。过往总结记录可在好友/群聊设置页的“总结历史”查看")
-            section("OpenAI 兼容接口设置", "支持任何 OpenAI 兼容的第三方大模型 API (DeepSeek/Ollama 等)。留空则使用内置端点。")
-            textInput("接口地址 (Base URL)", "例如 https://api.openai.com/v1 或 https://api.deepseek.com", Settings.aiApiUrl)
-            textInput("API Key", "你的 API 密钥 (留空无鉴权)", Settings.aiApiKey)
-            textInput("模型名称 (Model)", "例如 gpt-4o-mini 或 deepseek-chat", Settings.aiModel)
+            section("自定义 OpenAI 接口", "支持接入任何兼容 OpenAI 标准的第三方大模型 API")
+            textInput("自定义 API 地址", "接口URL，如 https://api.openai.com/v1/chat/completions，留空使用内置", Settings.customAiApiUrl)
+            textInput("自定义 API Key", "API 密钥(sk-...)，留空使用内置接口", Settings.customAiApiKey)
+            textInput("自定义模型名称", "模型ID，如 gpt-4o-mini、deepseek-chat，默认 gpt-4o-mini", Settings.customAiModel)
         },
         SettingsCategory("关于与更新", "版本更新") {
             switch("自动检查更新", "启动时检查 QQ Max 新版本，可在关于页手动检查", Settings.autoUpdateCheck)
@@ -1330,4 +1330,4 @@ class 设置页 : SettingsActivity() {
     }
 }
 
-typealias GroupScopeFix = momoi.mod.qqpro.lib.LinearScope
+private typealias GroupScopeFix = momoi.mod.qqpro.lib.LinearScope

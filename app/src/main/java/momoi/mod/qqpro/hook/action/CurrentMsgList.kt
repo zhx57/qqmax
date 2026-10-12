@@ -412,6 +412,14 @@ object CurrentMsgList {
                 Utils.log("MsgList.NoEviction: msgLimitCnt -> -1 (sliding-window eviction disabled)")
             }.onFailure { Utils.log("MsgList.NoEviction: failed to disable eviction: $it") }
         }
+
+        override fun d(ids: MutableList<Long>?) {
+            if (momoi.mod.qqpro.Settings.antiRecall.value) {
+                Utils.log("MsgList.NoEviction: antiRecall blocked d(ids=$ids), message preserved")
+                return
+            }
+            super.d(ids)
+        }
     }
 
     @Mixin

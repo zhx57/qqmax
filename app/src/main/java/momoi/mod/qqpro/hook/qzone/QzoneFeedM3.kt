@@ -244,12 +244,8 @@ object QzoneFeedCard {
         dumpRepostDebug(data)
         val card = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(M3.surfaceContainer)
-                cornerRadius = M3.radiusLg
-                setStroke(1.dp, M3.outline)
-            }
-            setPadding(14.dp, 14.dp, 14.dp, 10.dp)
+            background = M3.rounded(M3.surfaceContainer, M3.radiusLg)
+            setPadding(12.dp, 12.dp, 12.dp, 8.dp)
         }
         val user: User? = runCatching { data.user }.getOrNull()
 
