@@ -208,6 +208,7 @@ object M3 {
 
     // ── Disabled (Miuix disabled roles) ─────────────────────────────────────────
     val disabledPrimary: Int get() = dl(0xFF_253E64.toInt(), 0xFF_C2D9FF.toInt())
+    val disabledOnPrimary: Int get() = dl(0xFF_677993.toInt(), 0xFF_F3F8FF.toInt())
     val disabledSecondary: Int get() = dl(0xFF_3F3F3F.toInt(), 0xFF_F0F0F0.toInt())
     val disabledOnSurface: Int get() = dl(0xFF_666666.toInt(), 0xFF_B2B2B2.toInt())
 
