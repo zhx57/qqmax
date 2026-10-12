@@ -32,9 +32,9 @@ class M3Switch(ctx: Context) : View(ctx), Checkable {
     private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
 
-    private val w = 42.dp
-    private val h = 24.dp
-    private val pad = 3.dp.toFloat()
+    private val w = 44.dp
+    private val h = 26.dp
+    private val pad = 2.5f.dp.toFloat()
 
     init {
         isClickable = true
@@ -67,7 +67,8 @@ class M3Switch(ctx: Context) : View(ctx), Checkable {
         anim?.cancel()
         if (!isLaidOut) { pos = target; invalidate(); return }
         anim = ValueAnimator.ofFloat(pos, target).apply {
-            duration = 160
+            duration = 180
+            interpolator = M3Motion.EasingEmphasized
             addUpdateListener { pos = it.animatedValue as Float; invalidate() }
             start()
         }
@@ -79,18 +80,18 @@ class M3Switch(ctx: Context) : View(ctx), Checkable {
         val tw = (width - paddingLeft - paddingRight).toFloat()
         val th = (height - paddingTop - paddingBottom).toFloat()
 
-        // Track: interpolate outline (off) → primary (on).
-        trackPaint.color = argb.evaluate(pos, M3.outline, M3.primary) as Int
+        // MIUIX Track: off = soft muted capsule (dark: 0x2E_FFFFFF, light: 0xFF_E3E3E5); on = MIUI primary blue
+        val offTrackColor = if (M3.luminance(M3.surface) > 0.5f) 0xFF_E3E3E5.toInt() else 0x33_FFFFFF
+        trackPaint.color = argb.evaluate(pos, offTrackColor, M3.primary) as Int
         rect.set(cx, cy, cx + tw, cy + th)
         val r = th / 2f
         canvas.drawRoundRect(rect, r, r, trackPaint)
 
-        // Thumb sliding left→right. Color interpolates onSurface (off, on the dark outline track) →
-        // onPrimary (on, on the accent track) so it stays legible against whichever track color.
+        // MIUIX Thumb: pure white circular pill knob across both on/off states
         val thumbR = th / 2f - pad
         val travel = tw - th
         val thumbCx = cx + r + travel * pos
-        thumbPaint.color = argb.evaluate(pos, M3.onSurface, M3.onPrimary) as Int
+        thumbPaint.color = 0xFF_FFFFFF.toInt()
         canvas.drawCircle(thumbCx, cy + r, thumbR, thumbPaint)
     }
 }

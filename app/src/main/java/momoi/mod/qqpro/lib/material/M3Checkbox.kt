@@ -48,20 +48,22 @@ class M3CheckDrawable : Drawable() {
 
     override fun onBoundsChange(b: Rect) { check.bounds = b }
 
-    override fun getIntrinsicWidth() = 16.dp
-    override fun getIntrinsicHeight() = 16.dp
+    override fun getIntrinsicWidth() = 18.dp
+    override fun getIntrinsicHeight() = 18.dp
 
     override fun draw(canvas: Canvas) {
         val b = bounds
-        val inset = stroke.strokeWidth
+        val inset = stroke.strokeWidth / 2f
         rect.set(b.left + inset, b.top + inset, b.right - inset, b.bottom - inset)
         if (checked) {
+            // MIUIX circular filled checkbox
             fill.color = if (enabled) M3.primary else dim(M3.primary, 0x61)
-            canvas.drawRoundRect(rect, radius, radius, fill)
+            canvas.drawOval(rect, fill)
             check.draw(canvas)
         } else {
+            // MIUIX circular outline checkbox
             stroke.color = if (enabled) M3.onSurfaceVariant else dim(M3.onSurfaceVariant, 0x61)
-            canvas.drawRoundRect(rect, radius, radius, stroke)
+            canvas.drawOval(rect, stroke)
         }
     }
 

@@ -117,9 +117,8 @@ object M3 {
         }
     }
 
-    // Accent (primary). Dark = Material Blue 200 (softer tone for dark UIs); Light = Blue 700, a deeper
-    // MD3-tone-40-style accent with enough contrast on light surfaces. White label on the accent.
-    val DEFAULT_PRIMARY get() = dl(0xFF_90CAF9.toInt(), 0xFF_1976D2.toInt())
+    // Accent (primary). Dark = MIUI Night Blue (3388FF, high contrast); Light = MIUI Classic Blue (007DFF).
+    val DEFAULT_PRIMARY get() = dl(0xFF_3388FF.toInt(), 0xFF_007DFF.toInt())
 
     val primary: Int get() = tok(momoi.mod.qqpro.Settings.themeColor.value, SysRole.PRIMARY, DEFAULT_PRIMARY)
     /**
@@ -133,7 +132,7 @@ object M3 {
     /** Translucent tonal container; blank pref = the system tonal (opaque) or auto (accent at 0x33). */
     val primaryContainer: Int get() = parseColorOrNull(momoi.mod.qqpro.Settings.themePrimaryContainer.value)
         ?: sys(SysRole.PRIMARY_CONTAINER)
-        ?: ((primary and 0x00FFFFFF) or 0x33_000000)
+        ?: ((primary and 0x00FFFFFF) or 0x26_000000)
     val onPrimaryContainer: Int get() = parseColorOrNull(momoi.mod.qqpro.Settings.themeOnPrimaryContainer.value)
         ?: sys(SysRole.ON_PRIMARY_CONTAINER)
         ?: primary
@@ -144,24 +143,24 @@ object M3 {
      */
     val tonalSolid: Int get() = compositeOver(primaryContainer, surface)
 
-    // ── Surfaces (light defaults = MD3 baseline neutral surfaces / surface-container tones) ───────
-    val surface: Int get() = tok(momoi.mod.qqpro.Settings.themeSurface.value, SysRole.SURFACE, dl(0xFF_1A1A1A.toInt(), 0xFF_FFFBFE.toInt()))              // screen background
-    val surfaceContainer: Int get() = tok(momoi.mod.qqpro.Settings.themeSurfaceContainer.value, SysRole.SURFACE_CONTAINER, dl(0xFF_222222.toInt(), 0xFF_F3EDF7.toInt()))     // field / sunken surface / card
-    val surfaceContainerHigh: Int get() = tok(momoi.mod.qqpro.Settings.themeSurfaceContainerHigh.value, SysRole.SURFACE_CONTAINER_HIGH, dl(0xFF_2A2A2A.toInt(), 0xFF_ECE6F0.toInt())) // raised card / row pressed
-    val surfaceVariant: Int get() = tok(momoi.mod.qqpro.Settings.themeSurfaceVariant.value, SysRole.SURFACE_VARIANT, dl(0xFF_2E2E2E.toInt(), 0xFF_E7E0EC.toInt()))
+    // ── Surfaces (MIUIX palette: pure black / calm grey background + high contrast cards) ───────
+    val surface: Int get() = tok(momoi.mod.qqpro.Settings.themeSurface.value, SysRole.SURFACE, dl(0xFF_000000.toInt(), 0xFF_F6F6F8.toInt()))              // screen background
+    val surfaceContainer: Int get() = tok(momoi.mod.qqpro.Settings.themeSurfaceContainer.value, SysRole.SURFACE_CONTAINER, dl(0xFF_1F1F1F.toInt(), 0xFF_FFFFFF.toInt()))     // MIUI card container
+    val surfaceContainerHigh: Int get() = tok(momoi.mod.qqpro.Settings.themeSurfaceContainerHigh.value, SysRole.SURFACE_CONTAINER_HIGH, dl(0xFF_292929.toInt(), 0xFF_EEEEF0.toInt())) // raised card / row pressed
+    val surfaceVariant: Int get() = tok(momoi.mod.qqpro.Settings.themeSurfaceVariant.value, SysRole.SURFACE_VARIANT, dl(0xFF_262626.toInt(), 0xFF_E6E6E8.toInt()))
 
-    // ── Content (light defaults = MD3 baseline on-surface / outline tones) ───────────────────────
-    val onSurface: Int get() = tok(momoi.mod.qqpro.Settings.themeOnSurface.value, SysRole.ON_SURFACE, dl(0xFF_FFFFFF.toInt(), 0xFF_1C1B1F.toInt()))
-    val onSurfaceVariant: Int get() = tok(momoi.mod.qqpro.Settings.themeOnSurfaceVariant.value, SysRole.ON_SURFACE_VARIANT, dl(0xFF_C9C7CE.toInt(), 0xFF_49454F.toInt()))     // inactive icon/text
-    val onSurfaceTip: Int get() = tok(momoi.mod.qqpro.Settings.themeOnSurfaceTip.value, SysRole.ON_SURFACE_TIP, dl(0xFF_999999.toInt(), 0xFF_6A6A70.toInt()))         // secondary/hint text
-    val hint: Int get() = tok(momoi.mod.qqpro.Settings.themeHint.value, SysRole.HINT, dl(0xFF_777777.toInt(), 0xFF_8A8A90.toInt()))
-    val outline: Int get() = tok(momoi.mod.qqpro.Settings.themeOutline.value, SysRole.OUTLINE, dl(0xFF_444444.toInt(), 0xFF_79747E.toInt()))
-    val outlineVariant: Int get() = tok(momoi.mod.qqpro.Settings.themeOutlineVariant.value, SysRole.OUTLINE_VARIANT, dl(0xFF_333333.toInt(), 0xFF_CAC4D0.toInt()))
+    // ── Content (MIUIX typography tones) ───────────────────────
+    val onSurface: Int get() = tok(momoi.mod.qqpro.Settings.themeOnSurface.value, SysRole.ON_SURFACE, dl(0xFF_FFFFFF.toInt(), 0xFF_111111.toInt()))
+    val onSurfaceVariant: Int get() = tok(momoi.mod.qqpro.Settings.themeOnSurfaceVariant.value, SysRole.ON_SURFACE_VARIANT, dl(0x99_FFFFFF.toInt(), 0x80_000000.toInt()))     // 60% white / 50% black
+    val onSurfaceTip: Int get() = tok(momoi.mod.qqpro.Settings.themeOnSurfaceTip.value, SysRole.ON_SURFACE_TIP, dl(0x66_FFFFFF.toInt(), 0x4D_000000.toInt()))         // 40% white / 30% black
+    val hint: Int get() = tok(momoi.mod.qqpro.Settings.themeHint.value, SysRole.HINT, dl(0x66_FFFFFF.toInt(), 0x4D_000000.toInt()))
+    val outline: Int get() = tok(momoi.mod.qqpro.Settings.themeOutline.value, SysRole.OUTLINE, dl(0x1F_FFFFFF.toInt(), 0x14_000000.toInt()))
+    val outlineVariant: Int get() = tok(momoi.mod.qqpro.Settings.themeOutlineVariant.value, SysRole.OUTLINE_VARIANT, dl(0x14_FFFFFF.toInt(), 0x0F_000000.toInt()))
 
-    // ── Status ─────────────────────────────────────────────────────────────────
-    val error: Int get() = parseColor(momoi.mod.qqpro.Settings.themeError.value, dl(0xFF_E5443C.toInt(), 0xFF_B3261E.toInt()))
+    // ── Status (MIUI alert red) ──────────────────────────────────────────────────
+    val error: Int get() = parseColor(momoi.mod.qqpro.Settings.themeError.value, dl(0xFF_FF4D4F.toInt(), 0xFF_F04438.toInt()))
     val badge: Int get() = error                   // unread/notification badge follows the error token
-    val legacyBtn = 0xFF_1B9AF7.toInt()            // older link/button blue (Colors.btn)
+    val legacyBtn = 0xFF_007DFF.toInt()            // MIUI link/button blue (Colors.btn)
 
     // ── Chat tokens (referenced by Colors aliases; values must stay exact) ───────
     val replyText = 0xFF_DDDDDD.toInt()
@@ -178,10 +177,10 @@ object M3 {
         val ownerBg   get() = dl(0xFF_412917.toInt(), 0xFF_FCE6D2.toInt()); val ownerText   get() = dl(0xFF_FF8D40.toInt(), 0xFF_C25700.toInt())
     }
 
-    // ── Shape / dimens ───────────────────────────────────────────────────────────
+    // ── Shape / dimens (MIUIX squircle continuous rounded corners) ───────────────
     val radiusSm get() = 8.dp.toFloat()
-    val radiusMd get() = 12.dp.toFloat()
-    val radiusLg get() = 16.dp.toFloat()
+    val radiusMd get() = 14.dp.toFloat()
+    val radiusLg get() = 20.dp.toFloat() // 20dp smooth card corner
     val radiusPill = 9999f
 
     // ── Deprecated aliases (kept so existing call sites keep compiling) ──────────
@@ -273,12 +272,42 @@ object M3 {
     }
 
     /**
-     * Wrap a content drawable with an M3 ripple (pressed feedback). The mask BOUNDS the ripple: when
-     * no [content] is given we still pass an opaque mask so the ripple is clipped to the view's bounds
-     * instead of spilling out as an unbounded full circle.
+     * Wrap a content drawable with an MIUIX ripple (pressed feedback). The mask BOUNDS the ripple.
      */
-    fun ripple(content: Drawable?, rippleColor: Int = 0x33_FFFFFF): RippleDrawable =
+    fun ripple(content: Drawable?, rippleColor: Int = dl(0x1F_FFFFFF, 0x12_000000)): RippleDrawable =
         RippleDrawable(ColorStateList.valueOf(rippleColor), content, content ?: ColorDrawable(Color.WHITE))
+
+    /**
+     * Attach a MIUI Folme-style physical spring touch-recoil feedback to [view].
+     * Scales slightly down on press (e.g. 0.96f) and recoils with a gentle spring overshoot on lift.
+     */
+    fun attachMiuixTouchFeedback(view: View, targetScale: Float = 0.96f) {
+        var pressSpring: SpringAnimator? = null
+        val releaseDelayMs = 80L
+        val releaseRunnable = Runnable {
+            pressSpring = SpringAnimator()
+                .stiffness(M3Motion.SpringStiffnessLow)
+                .dampingRatio(M3Motion.SpringDampingMediumBouncy)
+                .startFrom(view.scaleX)
+                .apply { animateTo(1f) { s -> view.scaleX = s; view.scaleY = s } }
+        }
+        view.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    pressSpring?.cancel()
+                    v.removeCallbacks(releaseRunnable)
+                    view.scaleX = targetScale
+                    view.scaleY = targetScale
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    pressSpring?.cancel()
+                    v.removeCallbacks(releaseRunnable)
+                    v.postDelayed(releaseRunnable, releaseDelayMs)
+                }
+            }
+            false
+        }
+    }
 
     /** A rounded, sunken M3 search/text field. */
     fun searchField(ctx: Context, hint: String): EditText = EditText(ctx).apply {

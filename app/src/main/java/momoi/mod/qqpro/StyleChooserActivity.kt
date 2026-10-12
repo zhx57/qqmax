@@ -74,20 +74,20 @@ class StyleChooserActivity : Activity() {
                 .gravity(Gravity.CENTER)
                 .padding(bottom = 4.dp)
             add<TextView>()
-                .text("可随时在「设置 › Material 化 › 界面风格」重新选择")
+                .text("可随时在「设置 › 外观与界面 › 界面风格」重新选择")
                 .textSize(12f)
                 .textColor(M3.onSurfaceVariant)
                 .gravity(Gravity.CENTER)
                 .padding(bottom = 16.dp)
 
             styleCard(
-                title = "Material 设计",
-                desc = "M3 风格的聊天、菜单、列表、资料卡、空间与底部导航栏",
+                title = "MIUIX 设计",
+                desc = "MIUIX / HyperOS 风格的聊天、卡片菜单、列表、资料卡、空间与底部导航栏",
                 material = true,
             )
             styleCard(
                 title = "原始设计",
-                desc = "保留 QQ 原生界面与翻页指示器，关闭所有 Material 重设计",
+                desc = "保留 QQ 原生界面与翻页指示器，关闭 MIUIX 重设计",
                 material = false,
             )
 

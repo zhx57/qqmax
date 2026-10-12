@@ -33,17 +33,17 @@ class M3Slider(ctx: Context) : View(ctx), HorizontalDragWidget {
 
     var activeColor: Int = M3.primary
         set(value) { field = value; invalidate() }
-    var inactiveColor: Int = 0x4D_FFFFFF.toInt()
+    var inactiveColor: Int = 0x33_FFFFFF.toInt()
         set(value) { field = value; invalidate() }
-    var thumbColor: Int = M3.primary
+    var thumbColor: Int = 0xFF_FFFFFF.toInt()
         set(value) { field = value; invalidate() }
 
     var onStartTracking: (() -> Unit)? = null
     var onProgressChanged: ((progress: Int, fromUser: Boolean) -> Unit)? = null
     var onStopTracking: (() -> Unit)? = null
 
-    private val trackH = 4.dp.toFloat()
-    private val thumbR = 7.dp.toFloat()
+    private val trackH = 5.dp.toFloat()
+    private val thumbR = 8.dp.toFloat()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
     private var tracking = false

@@ -37,7 +37,8 @@ class M3Dialog(ctx: Context) : ScrollView(ctx) {
         setPadding(20.dp, 20.dp, 20.dp, 20.dp)
     }
     private val titleView = TextView(ctx).apply {
-        textSize = 17f; setTextColor(M3.onSurface); gravity = Gravity.CENTER
+        textSize = 17.5f; typeface = android.graphics.Typeface.DEFAULT_BOLD
+        setTextColor(M3.onSurface); gravity = Gravity.CENTER
         setPadding(0, 0, 0, 12.dp); visibility = View.GONE
     }
     private val actionsRow = LinearLayout(ctx).vertical().apply {

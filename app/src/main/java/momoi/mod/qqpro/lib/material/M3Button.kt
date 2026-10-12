@@ -31,20 +31,18 @@ class M3Button(ctx: Context) : TextView(ctx) {
     init {
         gravity = Gravity.CENTER
         isSingleLine = true
-        textSize = 14f
+        textSize = 14.5f
         typeface = Typeface.DEFAULT_BOLD
-        setPadding(20.dp, 9.dp, 20.dp, 9.dp)
+        setPadding(20.dp, 10.dp, 20.dp, 10.dp)
         isClickable = true
         isFocusable = true
-        // Spring press-recoil: 0.96 on down, spring back with gentle overshoot (low stiffness +
-        // medium-bouncy damping reads as lively but never twitchy). releaseDelayMs before the
-        // release animation makes the recoil feel like a deliberate "lift", not an instant snap.
+        // MIUI Folme-style spring press-recoil: 0.95 on touch down, spring back with lively settle
         setOnTouchListener { v, event ->
             when (event.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
                     pressSpring?.cancel()
                     v.removeCallbacks(releaseRunnable)
-                    scaleX = 0.96f; scaleY = 0.96f
+                    scaleX = 0.95f; scaleY = 0.95f
                 }
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                     pressSpring?.cancel()
@@ -60,9 +58,9 @@ class M3Button(ctx: Context) : TextView(ctx) {
     private val releaseRunnable = Runnable {
         val v = this
         pressSpring = SpringAnimator()
-            .stiffness(M3Motion.SpringStiffnessLow)        // slower settle — visible, expressive
-            .dampingRatio(M3Motion.SpringDampingMediumBouncy) // one soft overshoot
-            .startFrom(0.96f)
+            .stiffness(M3Motion.SpringStiffnessLow)
+            .dampingRatio(M3Motion.SpringDampingMediumBouncy)
+            .startFrom(0.95f)
             .apply { animateTo(1f) { s -> v.scaleX = s; v.scaleY = s } }
     }
 

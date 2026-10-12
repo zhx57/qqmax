@@ -21,11 +21,11 @@ class M3ListItem(ctx: Context) : LinearLayout(ctx) {
 
     private val textCol = LinearLayout(ctx).apply { orientation = VERTICAL }
     private val titleView = TextView(ctx).apply {
-        setTextColor(M3.onSurface); textSize = 14f
+        setTextColor(M3.onSurface); textSize = 14.5f
         isSingleLine = true; ellipsize = TextUtils.TruncateAt.END
     }
     private val subtitleView = TextView(ctx).apply {
-        setTextColor(M3.onSurfaceVariant); textSize = 11f
+        setTextColor(M3.onSurfaceVariant); textSize = 11.5f
         maxLines = 2; ellipsize = TextUtils.TruncateAt.END
         visibility = View.GONE
     }
@@ -35,17 +35,18 @@ class M3ListItem(ctx: Context) : LinearLayout(ctx) {
     init {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(12.dp, 10.dp, 12.dp, 10.dp)
+        // MIUIX comfortable row padding: 14dp horizontal, 11dp vertical
+        setPadding(14.dp, 11.dp, 14.dp, 11.dp)
         background = M3.ripple(null)
         textCol.addView(titleView)
         textCol.addView(subtitleView)
         addView(textCol, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
     }
 
-    /** Compact density: smaller title/subtitle text + tighter vertical padding (opt-in, for dense settings lists). */
+    /** Compact density: smaller title/subtitle text + tighter vertical padding. */
     fun dense(): M3ListItem = apply {
         titleView.textSize = 13f
-        subtitleView.textSize = 10f
+        subtitleView.textSize = 10.5f
         setPadding(12.dp, 7.dp, 12.dp, 7.dp)
     }
 
