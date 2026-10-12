@@ -54,8 +54,8 @@ object CurrentMsgList {
                 if (ele.pttElement != null) sb.append("[语音]")
                 if (ele.videoElement != null) sb.append("[视频]")
                 if (ele.fileElement != null) sb.append("[文件]")
-                ele.arkElement?.bytesData?.let { bytes ->
-                    runCatching { momoi.mod.qqpro.util.Json(String(bytes, Charsets.UTF_8)).str("prompt") }
+                ele.arkElement?.bytesData?.let { data ->
+                    runCatching { momoi.mod.qqpro.util.Json(data).str("prompt") }
                         .getOrNull()?.let { sb.append(it) }
                 }
             }
