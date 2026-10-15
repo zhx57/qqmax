@@ -55,6 +55,81 @@ object MainNav {
     private val PILL_COLOR get() = ((M3.primary and 0x00FFFFFF) or 0x2A_000000)      // MIUI translucent active pill
     private val IDLE_ICON get() = M3.onSurfaceVariant       // on-surface-variant (inactive icon)
     private val DOT_COLOR get() = M3.onSurfaceVariant
+
+    /**
+     * Liquid-glass bar surface, ported from big-dictator/LiquidTab (config/GlassConfig defaults +
+     * GlassHostLayout.drawGlassPanel). The upstream requires API 31+ (RenderNode + RenderEffect
+     * backdrop refraction, AGSL bloom shader); this watch is API 30, so the recipe degrades to a
+     * CPU drawable while keeping the same visual constants:
+     *  - fill: LiquidTab surfaceContainerColor — dark #211F26 / light #FFFFFF at a fixed 40% alpha
+     *  - capsule: corner radius = height × 50% (LiquidTab cornerRadiusPercent = 50)
+     *  - bloom stroke: 1dp white edge lit by two lights (primary at -45° with intensity 1.0,
+     *    secondary from below at 0.4, over a 0.12 base — the AGSL shader's cos² falloff), total
+     *    stroke alpha dark 0.58 × highlightStrength(0.5) = 0.29, light 0.75. The AGSL per-fragment
+     *    lighting is approximated with a 90-step SweepGradient around the capsule center.
+     *  - backdrop refraction (RenderEffect blur of the captured content behind the bar) is
+     *    unavailable on this API level and intentionally omitted — the 40% fill + highlight reads
+     *    as glass on its own.
+     */
+    private class LiquidGlassDrawable(private val dark: Boolean) : android.graphics.drawable.Drawable() {
+        private val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        private val stroke = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = 1.dp.toFloat()
+        }
+        private val path = android.graphics.Path()
+        private val rect = android.graphics.RectF()
+        private var strokeColors: IntArray? = null
+
+        init {
+            fill.color = if (dark) android.graphics.Color.argb((0.40f * 255).toInt(), 33, 31, 38)
+                         else android.graphics.Color.argb((0.40f * 255).toInt(), 255, 255, 255)
+            val strokeAlpha = (((if (dark) 0.58f else 0.75f) * (if (dark) 0.5f else 1f)) * 255).toInt().coerceIn(0, 255)
+            stroke.color = android.graphics.Color.TRANSPARENT
+            rebuildShader(strokeAlpha)
+        }
+
+        /** Build the dual-light bloom SweepGradient (90 steps around the center). */
+        private fun rebuildShader(strokeAlpha: Int) {
+            val steps = 90
+            val colors = IntArray(steps)
+            for (i in 0 until steps) {
+                val theta = Math.toRadians((i * 360.0 / steps))
+                // Primary light: -45° (up-left), intensity 1.0; secondary: from below (+y), 0.4.
+                val l1 = Math.cos(theta + Math.toRadians(45.0)).toFloat()
+                val l2 = Math.cos(theta - Math.toRadians(90.0)).toFloat()
+                val brightness = (0.12f + l1 * l1 + 0.4f * (l2 * l2)).coerceAtMost(1f)
+                val v = (brightness * 255).toInt().coerceIn(0, 255)
+                colors[i] = android.graphics.Color.argb(strokeAlpha, v, v, v)
+            }
+            strokeColors = colors
+        }
+
+        override fun onBoundsChange(bounds: android.graphics.Rect) {
+            val cx = bounds.exactCenterX()
+            val cy = bounds.exactCenterY()
+            strokeColors?.let { stroke.shader = android.graphics.SweepGradient(cx, cy, it, null) }
+        }
+
+        override fun draw(canvas: android.graphics.Canvas) {
+            val b = bounds
+            if (b.isEmpty) return
+            rect.set(b)
+            val inset = stroke.strokeWidth * 0.5f
+            rect.inset(inset, inset)
+            path.reset()
+            val r = rect.height().coerceAtMost(rect.width()) / 2f
+            path.addRoundRect(rect, r, r, android.graphics.Path.Direction.CW)
+            canvas.drawPath(path, fill)
+            canvas.drawPath(path, stroke)
+        }
+
+        override fun setAlpha(alpha: Int) {}
+        override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
+    }
+
     private val BADGE_COLOR get() = M3.badge
 
     // Live unread, kept in sync by the kernel listener — same source RichTitlebar uses.
@@ -211,12 +286,8 @@ object MainNav {
                 gravity = Gravity.CENTER
                 clipChildren = false
                 clipToPadding = false
-                // MIUIX Floating Island / Capsule background
-                background = GradientDrawable().apply {
-                    setColor(M3.surfaceContainer)
-                    cornerRadius = 9999f
-                    setStroke(1.dp, M3.outline)
-                }
+                // Liquid-glass surface (LiquidTab recipe): 40% fill + dual-light bloom stroke.
+                background = LiquidGlassDrawable(!Settings.lightMode.value)
                 setPadding(10.dp, 2.dp, 10.dp, 2.dp)
                 // Stay hidden until positionBar has placed us (bottom/top); otherwise the bar paints
                 // one frame at its default y=0 (top) before the deferred post moves it down — a visible
@@ -358,6 +429,8 @@ object MainNav {
             val pill = View(ctx).apply {
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE; cornerRadius = 9999f; setColor(PILL_COLOR)
+                    // Liquid-glass pill highlight: a faint white bloom edge (LiquidTab indicator).
+                    setStroke(1.dp, 0x2EFFFFFF)
                 }
                 visibility = View.GONE
             }
@@ -416,6 +489,8 @@ object MainNav {
             val pill = View(ctx).apply {
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE; cornerRadius = 9999f; setColor(PILL_COLOR)
+                    // Liquid-glass pill highlight: a faint white bloom edge (LiquidTab indicator).
+                    setStroke(1.dp, 0x2EFFFFFF)
                 }
                 visibility = View.GONE
             }
