@@ -86,7 +86,7 @@ object MainNav {
         private val specularPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = 1.2f.dp.toFloat()
+            strokeWidth = 1.dp.toFloat()
         }
         private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.argb(80, 0, 0, 0)
