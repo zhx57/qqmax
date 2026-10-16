@@ -95,6 +95,7 @@ object MainNav {
             setShadowLayer(8.dp.toFloat(), 0f, 2.dp.toFloat(), Color.argb(90, 0, 0, 0))
         }
         private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val shinePaint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val path = Path()
         private val rect = RectF()
         private var strokeColors: IntArray? = null
@@ -121,9 +122,9 @@ object MainNav {
         private var lastCaptureMs = 0L
 
         init {
-            fill.color = if (dark) Color.argb((0.40f * 255).toInt(), 33, 31, 38)
-                         else Color.argb((0.40f * 255).toInt(), 255, 255, 255)
-            val strokeAlpha = (((if (dark) 0.58f else 0.75f) * (if (dark) 0.5f else 1f)) * 255).toInt().coerceIn(0, 255)
+            fill.color = if (dark) Color.argb((0.55f * 255).toInt(), 50, 48, 58)
+                         else Color.argb((0.50f * 255).toInt(), 255, 255, 255)
+            val strokeAlpha = (((if (dark) 0.65f else 0.85f)) * 255).toInt().coerceIn(0, 255)
             stroke.color = Color.TRANSPARENT
             rebuildShader(strokeAlpha)
         }
@@ -184,8 +185,17 @@ object MainNav {
             canvas.clipPath(path)
             backdrop?.let { canvas.drawBitmap(it, null, rect, blurPaint) }
 
-            // 3. 40% surface container fill
+            // 3. Surface container fill
             canvas.drawRect(rect, fill)
+
+            // 3.1 Upper glass specular reflection shine
+            shinePaint.shader = android.graphics.LinearGradient(
+                rect.left, rect.top, rect.left, rect.top + rect.height() * 0.55f,
+                Color.argb((0.18f * 255).toInt(), 255, 255, 255),
+                Color.TRANSPARENT,
+                Shader.TileMode.CLAMP
+            )
+            canvas.drawPath(path, shinePaint)
 
             // 4. LiquidTab Interactive Highlight (RadialGradient centered at the selected tab)
             if (activeTabCenterX >= 0f) {
@@ -335,7 +345,24 @@ object MainNav {
         QZoneFeedAlertService.h()?.i(1)?.takeIf { it > 0 } ?: 0
     }.getOrDefault(0)
 
+    private var settingsListenerAdded = false
+
+    private fun ensureSettingsListener() {
+        if (settingsListenerAdded) return
+        settingsListenerAdded = true
+        Settings.sp.registerOnSharedPreferenceChangeListener { _, key ->
+            if (key != null && (key.startsWith("mainNav") || key == "bottomMainNav")) {
+                momoi.mod.qqpro.util.ThreadManager.runOnUiThread({
+                    active?.let { state ->
+                        render(state, force = true)
+                    }
+                })
+            }
+        }
+    }
+
     private fun ensureListener() {
+        ensureSettingsListener()
         if (listenerAdded) return
         runCatching {
             KernelServiceUtil.g()?.recentContactService?.addKernelRecentContactListener(UnreadListener())
@@ -345,7 +372,7 @@ object MainNav {
 
     fun refresh() {
         val state = active ?: return
-        state.nav.post { render(state) }
+        state.nav.post { render(state, force = true) }
     }
 
     fun install(root: ViewGroup) {
@@ -438,6 +465,11 @@ object MainNav {
                 ensurePagePadding(pagerView, barHeightPx() + 8.dp)
             }
             positionBar(parent, pagerView, indicator, nav, barHeight)
+            nav.viewTreeObserver.addOnWindowFocusChangeListener { hasFocus ->
+                if (hasFocus && active === state) {
+                    render(state, force = true)
+                }
+            }
 
             ensureListener()
             render(state)
@@ -721,7 +753,7 @@ object MainNav {
         // (铺开 / 文字标签 / 显示所有图标 / 导航高度 / 位置) — apply immediately to layout & cells.
         val layoutKey = "${Settings.mainNavSquare.value}|${Settings.mainNavLabels.value}|" +
             "${Settings.mainNavAllIcons.value}|${Settings.mainNavHeight.value}|${Settings.bottomMainNav.value}"
-        if (layoutKey != state.layoutKey) {
+        if (layoutKey != state.layoutKey || force) {
             state.layoutKey = layoutKey
             buildCells(state)
             updateNavLayoutParams(state)

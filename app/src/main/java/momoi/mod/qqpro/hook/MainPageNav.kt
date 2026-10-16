@@ -23,11 +23,4 @@ class MainPageNav : MainFragment() {
             MainNav.installNative(root)
         }
     }
-
-    override fun onResume() {
-        super.onResume()
-        if (momoi.mod.qqpro.Settings.mainNavCustom.value) {
-            MainNav.refresh()
-        }
-    }
 }
