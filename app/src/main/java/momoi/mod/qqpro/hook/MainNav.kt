@@ -399,26 +399,19 @@ object MainNav {
             val square = Settings.mainNavSquare.value
             val labels = Settings.mainNavLabels.value
             val isSpread = square || labels
-            val navLp = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(
-                if (isSpread) 0 else androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.WRAP_CONTENT,
-                barHeight
-            ).apply {
-                if (Settings.bottomMainNav.value) {
-                    bottomToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                    bottomMargin = if (isSpread) 4.dp else 10.dp
-                } else {
-                    topToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                    topMargin = 8.dp
-                }
-                startToStart = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                endToEnd = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+            val targetWidth = if (isSpread) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT
+            parent.addView(nav, ViewGroup.LayoutParams(targetWidth, barHeight))
+            nav.bringToFront()
+            if (Build.VERSION.SDK_INT >= 21) {
+                nav.elevation = 20.dp.toFloat()
+                nav.translationZ = 20.dp.toFloat()
+            }
+            (nav.layoutParams as? ViewGroup.MarginLayoutParams)?.let { mlp ->
                 if (isSpread) {
-                    leftMargin = 12.dp
-                    rightMargin = 12.dp
+                    mlp.leftMargin = 12.dp
+                    mlp.rightMargin = 12.dp
                 }
             }
-            parent.addView(nav, navLp)
-            nav.visibility = View.VISIBLE
 
             pager.observe {
                 render(state)
@@ -669,34 +662,46 @@ object MainNav {
         val square = Settings.mainNavSquare.value
         val labels = Settings.mainNavLabels.value
         val isSpread = square || labels
-        val padH = if (square) 10.dp else 8.dp
+        val padH = if (square) 12.dp else 8.dp
         nav.setPadding(padH, 2.dp, padH, 2.dp)
-        (nav.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { lp ->
-            lp.width = if (isSpread) 0 else androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.WRAP_CONTENT
-            lp.height = barHeight
-            if (Settings.bottomMainNav.value) {
-                lp.bottomToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                lp.topToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
-                lp.bottomMargin = if (isSpread) 4.dp else 10.dp
-                lp.topMargin = 0
-            } else {
-                lp.topToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                lp.bottomToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
-                lp.topMargin = 8.dp
-                lp.bottomMargin = 0
-            }
-            lp.startToStart = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-            lp.endToEnd = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-            if (isSpread) {
-                lp.leftMargin = 12.dp
-                lp.rightMargin = 12.dp
-            } else {
-                lp.leftMargin = 0
-                lp.rightMargin = 0
-            }
-            nav.layoutParams = lp
-            nav.requestLayout()
+        val parent = nav.parent as? ViewGroup
+        val parentW = parent?.width?.takeIf { it > 0 } ?: state.pager.pager.width
+        val targetWidth = if (isSpread) {
+            if (parentW > 0) parentW - 24.dp else ViewGroup.LayoutParams.MATCH_PARENT
+        } else {
+            ViewGroup.LayoutParams.WRAP_CONTENT
         }
+        nav.layoutParams?.let { lp ->
+            lp.width = targetWidth
+            lp.height = barHeight
+            (lp as? ViewGroup.MarginLayoutParams)?.let { mlp ->
+                if (isSpread) {
+                    mlp.leftMargin = 12.dp
+                    mlp.rightMargin = 12.dp
+                } else {
+                    mlp.leftMargin = 0
+                    mlp.rightMargin = 0
+                }
+            }
+        }
+        if (parent != null && parent.height > 0) {
+            val gap = if (isSpread) 4.dp else 10.dp
+            if (Settings.bottomMainNav.value) {
+                nav.translationY = (parent.height - barHeight - gap).toFloat()
+            } else {
+                nav.translationY = gap.toFloat()
+            }
+            if (!isSpread) {
+                val nw = nav.measuredWidth.takeIf { it > 0 } ?: nav.width
+                if (nw > 0 && parent.width > nw) {
+                    nav.translationX = ((parent.width - nw) / 2f) - nav.left.toFloat()
+                }
+            } else {
+                nav.translationX = 0f
+            }
+        }
+        nav.bringToFront()
+        nav.requestLayout()
     }
 
     private fun render(state: NavState, force: Boolean = false) {
@@ -963,24 +968,57 @@ object MainNav {
     private fun positionBar(
         parent: ViewGroup, pagerView: View, indicator: View, nav: LinearLayout, barHeight: Int,
     ) {
-        runCatching {
-            (pagerView.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams)?.let { clp ->
-                clp.bottomToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                clp.bottomToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
-                clp.topToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                clp.topToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
-                clp.bottomMargin = 0
-                clp.topMargin = 0
-                clp.height = 0
-                pagerView.layoutParams = clp
+        var lastH = -1
+        var lastW = -1
+        var lastTop = Int.MIN_VALUE
+        nav.viewTreeObserver.addOnPreDrawListener(
+            object : android.view.ViewTreeObserver.OnPreDrawListener {
+                override fun onPreDraw(): Boolean {
+                    val h = parent.height
+                    val w = parent.width
+                    val top = pagerView.top
+                    if (h <= 0 || w <= 0) return true
+                    if (h == lastH && w == lastW && top == lastTop) return true
+                    lastH = h; lastW = w; lastTop = top
+                    runCatching {
+                        // 1. Keep content pager full-bleed so content extends completely to the bottom edge
+                        if (pagerView.layoutParams.height != h) {
+                            pagerView.layoutParams = pagerView.layoutParams.apply { height = h }
+                            pagerView.requestLayout()
+                        }
+                        pagerView.translationY = -top.toFloat()
+
+                        // 2. Float the bar above the bottom with a clean gap
+                        val square = Settings.mainNavSquare.value
+                        val labels = Settings.mainNavLabels.value
+                        val isSpread = square || labels
+                        val gap = if (isSpread) 4.dp else 10.dp
+                        if (Settings.bottomMainNav.value) {
+                            nav.translationY = (h - barHeight - gap).toFloat()
+                        } else {
+                            nav.translationY = gap.toFloat()
+                        }
+
+                        // 3. Center horizontally for wrap_content capsule island
+                        if (!isSpread) {
+                            val nw = nav.measuredWidth.takeIf { it > 0 } ?: nav.width
+                            if (nw > 0 && w > nw) {
+                                nav.translationX = ((w - nw) / 2f) - nav.left.toFloat()
+                            }
+                        } else {
+                            nav.translationX = 0f
+                        }
+
+                        nav.bringToFront()
+                        nav.visibility = View.VISIBLE
+                        ensurePagePadding(pagerView, barHeight + gap + 10.dp)
+                    }.onFailure {
+                        nav.visibility = View.VISIBLE
+                    }
+                    return true
+                }
             }
-            pagerView.translationY = 0f
-            pagerView.requestLayout()
-            nav.visibility = View.VISIBLE
-            ensurePagePadding(pagerView, barHeight + 14.dp)
-        }.onFailure {
-            nav.visibility = View.VISIBLE
-        }
+        )
     }
 
     // Fixed page order: 0=chat, 1=contacts(person), 2=qzone(star), 3=self(settings)
