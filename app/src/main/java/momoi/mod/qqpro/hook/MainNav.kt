@@ -949,14 +949,10 @@ object MainNav {
     /** Ensure page list content extends behind the floating bar without the last row being occluded. */
     private fun ensurePagePadding(pagerView: View, bottomPad: Int) {
         runCatching {
-            val root = pagerView as? ViewGroup ?: return
-            val rvs = root.findAll { it is RecyclerView }
-            for (v in rvs) {
-                val rv = v as? RecyclerView ?: continue
-                if (rv.clipToPadding) rv.clipToPadding = false
-                if (rv.paddingBottom < bottomPad) {
-                    rv.setPadding(rv.paddingLeft, rv.paddingTop, rv.paddingRight, bottomPad)
-                }
+            val rv = findRecycler(pagerView) ?: return
+            if (rv.clipToPadding) rv.clipToPadding = false
+            if (rv.paddingBottom < bottomPad) {
+                rv.setPadding(rv.paddingLeft, rv.paddingTop, rv.paddingRight, bottomPad)
             }
         }
     }
