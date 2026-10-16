@@ -392,17 +392,14 @@ object MainNav {
             val square = Settings.mainNavSquare.value
             val labels = Settings.mainNavLabels.value
             val isSpread = square || labels
-            val navLp = FrameLayout.LayoutParams(
-                if (isSpread) FrameLayout.LayoutParams.MATCH_PARENT else FrameLayout.LayoutParams.WRAP_CONTENT,
-                barHeight
-            ).apply {
-                gravity = Gravity.CENTER_HORIZONTAL
+            val targetWidth = if (isSpread) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT
+            parent.addView(nav, ViewGroup.LayoutParams(targetWidth, barHeight))
+            (nav.layoutParams as? ViewGroup.MarginLayoutParams)?.let { mlp ->
                 if (isSpread) {
-                    leftMargin = 12.dp
-                    rightMargin = 12.dp
+                    mlp.leftMargin = 12.dp
+                    mlp.rightMargin = 12.dp
                 }
             }
-            parent.addView(nav, navLp)
 
             // Liquid glass backdrop: the provider redraws the CONTENT view (the pager — it never
             // contains the nav itself, so no recursion) clipped to the bar's strip, mapped into
@@ -670,24 +667,20 @@ object MainNav {
         val isSpread = square || labels
         val padH = if (square) 10.dp else 8.dp
         nav.setPadding(padH, 2.dp, padH, 2.dp)
-        val lp = nav.layoutParams as? FrameLayout.LayoutParams
-            ?: FrameLayout.LayoutParams(
-                if (isSpread) FrameLayout.LayoutParams.MATCH_PARENT else FrameLayout.LayoutParams.WRAP_CONTENT,
-                barHeight
-            )
-        lp.height = barHeight
-        if (isSpread) {
-            lp.width = FrameLayout.LayoutParams.MATCH_PARENT
-            lp.gravity = Gravity.CENTER_HORIZONTAL
-            lp.leftMargin = 12.dp
-            lp.rightMargin = 12.dp
-        } else {
-            lp.width = FrameLayout.LayoutParams.WRAP_CONTENT
-            lp.gravity = Gravity.CENTER_HORIZONTAL
-            lp.leftMargin = 0
-            lp.rightMargin = 0
+        val targetWidth = if (isSpread) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT
+        nav.layoutParams?.let { lp ->
+            lp.width = targetWidth
+            lp.height = barHeight
+            (lp as? ViewGroup.MarginLayoutParams)?.let { mlp ->
+                if (isSpread) {
+                    mlp.leftMargin = 12.dp
+                    mlp.rightMargin = 12.dp
+                } else {
+                    mlp.leftMargin = 0
+                    mlp.rightMargin = 0
+                }
+            }
         }
-        nav.layoutParams = lp
         val gap = 8.dp
         val parent = nav.parent as? View
         if (parent != null && parent.height > 0) {
