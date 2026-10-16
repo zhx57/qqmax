@@ -31,10 +31,13 @@ class 更新检查 : MainActivity() {
         // Start online-presence polling once at launch if any status surface is enabled (the kernel
         // won't push presence otherwise). Cheap no-op when all status toggles are off. See OnlineStatus.
         if (Settings.anyOnlineStatus) momoi.mod.qqpro.hook.action.OnlineStatus.start()
-        // The base QQ APK never requests Android 13+ POST_NOTIFICATIONS, so notifications are dropped
-        // until granted. Ask on launch (no-op below API 33 / once already granted).
-        NotificationPermission.ensure(this)
-        OTAManager2(this).checkUpdate(false)
+        // Run update check and notification check asynchronously so cold start stays buttery smooth.
+        momoi.mod.qqpro.util.ThreadManager.postDelayed({
+            runCatching {
+                NotificationPermission.ensure(this@更新检查)
+                OTAManager2(this@更新检查).checkUpdate(false)
+            }
+        }, 2500L)
         // MIUIX is the only design system now (the dual-style chooser was removed). A stale
         // uiStyle==2 means an old build's 原始设计 pick one-shot disabled every MIUIX toggle and
         // persisted it — re-enable them once so the redesign actually applies after update.

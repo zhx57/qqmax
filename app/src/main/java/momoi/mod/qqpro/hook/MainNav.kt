@@ -102,6 +102,14 @@ object MainNav {
         /** Center X coordinate of the active tab for rendering the interactive highlight bloom. */
         var activeTabCenterX: Float = -1f
 
+        /** Cache validity gate: backdrop is re-captured only on scroll or page changes, saving CPU/battery. */
+        var dirty = true
+
+        fun markDirty() {
+            dirty = true
+            invalidateSelf()
+        }
+
         /**
          * Called from draw() to grab the content currently behind the bar (the caller owns the
          * coordinate mapping and returns a bar-sized bitmap, or null). Throttled: the backdrop is
@@ -140,22 +148,22 @@ object MainNav {
             val cx = bounds.exactCenterX()
             val cy = bounds.exactCenterY()
             strokeColors?.let { stroke.shader = SweepGradient(cx, cy, it, null) }
-            lastCaptureMs = 0L // recapture for the new geometry
+            lastCaptureMs = 0L
+            markDirty()
         }
 
         override fun draw(canvas: android.graphics.Canvas) {
             val b = bounds
             if (b.isEmpty) return
             val now = android.os.SystemClock.uptimeMillis()
-            if (now - lastCaptureMs > CAPTURE_INTERVAL_MS) {
-                lastCaptureMs = now
-                backdropProvider?.invoke()?.let { raw ->
-                    val sw = (raw.width / 5f).toInt().coerceAtLeast(1)
-                    val sh = (raw.height / 5f).toInt().coerceAtLeast(1)
-                    val small = android.graphics.Bitmap.createScaledBitmap(raw, sw, sh, true)
-                    if (small !== raw) raw.recycle()
-                    backdrop?.recycle()
-                    backdrop = small
+            if (dirty || backdrop == null) {
+                if (now - lastCaptureMs > CAPTURE_INTERVAL_MS) {
+                    lastCaptureMs = now
+                    dirty = false
+                    backdropProvider?.invoke()?.let { small ->
+                        backdrop?.recycle()
+                        backdrop = small
+                    }
                 }
             }
             rect.set(b)
@@ -401,15 +409,18 @@ object MainNav {
                 }
             }
 
-            // Liquid glass backdrop: the provider redraws the CONTENT view (the pager — it never
-            // contains the nav itself, so no recursion) clipped to the bar's strip, mapped into
-            // the pager's coordinate space. The drawable throttles the capture to ~11 fps.
+            // Direct low-resolution backdrop capture: draws at 1/4 scale directly into a tiny bitmap.
+            // Avoids creating huge bitmaps and completely stops GC lag spikes.
             (nav.background as? LiquidGlassDrawable)?.backdropProvider = {
                 runCatching {
                     if (!nav.isShown || pagerView.width <= 0 || nav.width <= 0 || nav.height <= 0) null
                     else {
-                        val bm = android.graphics.Bitmap.createBitmap(nav.width, nav.height, android.graphics.Bitmap.Config.ARGB_8888)
+                        val scale = 0.25f
+                        val bw = (nav.width * scale).toInt().coerceAtLeast(1)
+                        val bh = (nav.height * scale).toInt().coerceAtLeast(1)
+                        val bm = android.graphics.Bitmap.createBitmap(bw, bh, android.graphics.Bitmap.Config.ARGB_8888)
                         val c = android.graphics.Canvas(bm)
+                        c.scale(scale, scale)
                         val navX = nav.left + nav.translationX
                         val navY = nav.top + nav.translationY
                         val pagerX = pagerView.left + pagerView.translationX
@@ -422,8 +433,9 @@ object MainNav {
             }
 
             pager.observe {
+                (nav.background as? LiquidGlassDrawable)?.markDirty()
                 render(state)
-                ensurePagePadding(pagerView, barHeightPx() + 8.dp + 4.dp)
+                ensurePagePadding(pagerView, barHeightPx() + 8.dp)
             }
             positionBar(parent, pagerView, indicator, nav, barHeight)
 
@@ -667,27 +679,31 @@ object MainNav {
         val isSpread = square || labels
         val padH = if (square) 10.dp else 8.dp
         nav.setPadding(padH, 2.dp, padH, 2.dp)
-        val targetWidth = if (isSpread) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT
+        val parentW = (nav.parent as? View)?.width?.takeIf { it > 0 } ?: state.pager.pager.width
+        val targetWidth = if (isSpread) {
+            if (parentW > 0) parentW - 20.dp else ViewGroup.LayoutParams.MATCH_PARENT
+        } else {
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        }
         nav.layoutParams?.let { lp ->
             lp.width = targetWidth
             lp.height = barHeight
             (lp as? ViewGroup.MarginLayoutParams)?.let { mlp ->
                 if (isSpread) {
-                    mlp.leftMargin = 12.dp
-                    mlp.rightMargin = 12.dp
+                    mlp.leftMargin = 10.dp
+                    mlp.rightMargin = 10.dp
                 } else {
                     mlp.leftMargin = 0
                     mlp.rightMargin = 0
                 }
             }
         }
-        val gap = 8.dp
         val parent = nav.parent as? View
         if (parent != null && parent.height > 0) {
             if (Settings.bottomMainNav.value) {
-                nav.translationY = (parent.height - barHeight - gap).toFloat()
+                nav.translationY = (parent.height - barHeight).toFloat()
             } else {
-                nav.translationY = gap.toFloat()
+                nav.translationY = 0f
             }
             if (!isSpread) {
                 val nw = nav.measuredWidth.takeIf { it > 0 } ?: nav.width
@@ -707,8 +723,8 @@ object MainNav {
             "${Settings.mainNavAllIcons.value}|${Settings.mainNavHeight.value}|${Settings.bottomMainNav.value}"
         if (layoutKey != state.layoutKey) {
             state.layoutKey = layoutKey
-            updateNavLayoutParams(state)
             buildCells(state)
+            updateNavLayoutParams(state)
             state.renderedKey = ""
             state.nav.requestLayout()
         }
@@ -971,20 +987,19 @@ object MainNav {
                     if (h == lastH && w == lastW && top == lastTop) return true
                     lastH = h; lastW = w; lastTop = top
                     runCatching {
-                        // 1. Keep content pager full-bleed so content extends and scrolls behind the glass bar
-                        if (pagerView.layoutParams.height != ViewGroup.LayoutParams.MATCH_PARENT &&
-                            pagerView.layoutParams.height != h
-                        ) {
-                            pagerView.layoutParams = pagerView.layoutParams.apply { height = ViewGroup.LayoutParams.MATCH_PARENT }
+                        // 1. Keep content pager full-bleed from top=0 to bottom=h, eliminating any bottom gap
+                        val targetH = h + top
+                        if (pagerView.layoutParams.height != targetH) {
+                            pagerView.layoutParams = pagerView.layoutParams.apply { height = targetH }
                             pagerView.requestLayout()
                         }
-                        pagerView.translationY = 0f
+                        pagerView.translationY = -top.toFloat()
 
-                        // 2. Float the bar above the screen bottom/top with gap
+                        // 2. Position the bar flush against bottom edge so no black strip appears below
                         if (Settings.bottomMainNav.value) {
-                            nav.translationY = (h - barHeight - gap).toFloat()
+                            nav.translationY = (h - barHeight).toFloat()
                         } else {
-                            nav.translationY = gap.toFloat()
+                            nav.translationY = 0f
                         }
 
                         // 3. Center horizontally for wrap_content capsule island
@@ -999,7 +1014,7 @@ object MainNav {
                         }
 
                         nav.visibility = View.VISIBLE
-                        ensurePagePadding(pagerView, barHeight + gap + 4.dp)
+                        ensurePagePadding(pagerView, barHeight + 8.dp)
                     }.onFailure {
                         // Never leave the bar stuck invisible if positioning threw.
                         nav.visibility = View.VISIBLE
