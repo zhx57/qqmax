@@ -32,7 +32,7 @@ class 更新检查 : MainActivity() {
         // won't push presence otherwise). Cheap no-op when all status toggles are off. See OnlineStatus.
         if (Settings.anyOnlineStatus) momoi.mod.qqpro.hook.action.OnlineStatus.start()
         // Run update check and notification check asynchronously so cold start stays buttery smooth.
-        momoi.mod.qqpro.util.ThreadManager.postDelayed({
+        momoi.mod.qqpro.util.ThreadManager.runOnUiThread({
             runCatching {
                 NotificationPermission.ensure(this@更新检查)
                 OTAManager2(this@更新检查).checkUpdate(false)
