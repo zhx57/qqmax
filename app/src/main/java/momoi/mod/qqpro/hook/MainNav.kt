@@ -2,7 +2,18 @@ package momoi.mod.qqpro.hook
 
 import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
+import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RadialGradient
+import android.graphics.Rect
+import android.graphics.RectF
+import android.graphics.Shader
+import android.graphics.SweepGradient
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.view.Gravity
 import android.view.animation.PathInterpolator
 import android.view.View
@@ -57,31 +68,39 @@ object MainNav {
     private val DOT_COLOR get() = M3.onSurfaceVariant
 
     /**
-     * Liquid-glass bar surface, ported from big-dictator/LiquidTab (config/GlassConfig defaults +
-     * GlassHostLayout.drawGlassPanel). The upstream requires API 31+ (RenderNode + RenderEffect
-     * backdrop refraction, AGSL bloom shader); this watch is API 30, so the recipe degrades to a
-     * CPU drawable while keeping the same visual constants:
-     *  - fill: LiquidTab surfaceContainerColor — dark #211F26 / light #FFFFFF at a fixed 40% alpha
-     *  - capsule: corner radius = height × 50% (LiquidTab cornerRadiusPercent = 50)
-     *  - bloom stroke: 1dp white edge lit by two lights (primary at -45° with intensity 1.0,
-     *    secondary from below at 0.4, over a 0.12 base — the AGSL shader's cos² falloff), total
-     *    stroke alpha dark 0.58 × highlightStrength(0.5) = 0.29, light 0.75. The AGSL per-fragment
-     *    lighting is approximated with a 90-step SweepGradient around the capsule center.
-     *  - backdrop refraction (RenderEffect blur of the captured content behind the bar) is
-     *    unavailable on this API level and intentionally omitted — the 40% fill + highlight reads
-     *    as glass on its own.
+     * Liquid-glass bar surface, 1:1 fidelity ported from big-dictator/LiquidTab (config/GlassConfig defaults +
+     * GlassHostLayout.drawGlassPanel + NativeBackdropBlur).
+     *
+     * Features:
+     *  - Ambient Drop Shadow: panel shadow ringing the capsule on all sides (clipOutPath prevents inner dimming).
+     *  - Backdrop with Saturation Boost: 1.45x color saturation filter on the captured/downscaled scene.
+     *  - Surface fill: LiquidTab surfaceContainerColor — dark #211F26 / light #FFFFFF at fixed 40% alpha.
+     *  - Interactive Highlight: LiquidTab RadialGradient bloom centered at the currently active tab.
+     *  - Dual-light bloom stroke: 1dp white edge lit by two lights (-45° primary 1.0, lower secondary 0.4).
+     *  - Capsule geometry: corner radius = height × 50% (cornerRadiusPercent = 50).
      */
     private class LiquidGlassDrawable(private val dark: Boolean) : android.graphics.drawable.Drawable() {
-        private val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-        private val stroke = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            style = android.graphics.Paint.Style.STROKE
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
             strokeWidth = 1.dp.toFloat()
         }
-        private val blurPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or
-            android.graphics.Paint.FILTER_BITMAP_FLAG)
-        private val path = android.graphics.Path()
-        private val rect = android.graphics.RectF()
+        private val blurPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+            // LiquidTab saturation boost: 1.45x saturation ensures colors pop cleanly through the glass
+            val cm = ColorMatrix().apply { setSaturation(1.45f) }
+            colorFilter = ColorMatrixColorFilter(cm)
+        }
+        private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.TRANSPARENT
+            setShadowLayer(8.dp.toFloat(), 0f, 2.dp.toFloat(), Color.argb(90, 0, 0, 0))
+        }
+        private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val path = Path()
+        private val rect = RectF()
         private var strokeColors: IntArray? = null
+
+        /** Center X coordinate of the active tab for rendering the interactive highlight bloom. */
+        var activeTabCenterX: Float = -1f
 
         /**
          * Called from draw() to grab the content currently behind the bar (the caller owns the
@@ -94,10 +113,10 @@ object MainNav {
         private var lastCaptureMs = 0L
 
         init {
-            fill.color = if (dark) android.graphics.Color.argb((0.40f * 255).toInt(), 33, 31, 38)
-                         else android.graphics.Color.argb((0.40f * 255).toInt(), 255, 255, 255)
+            fill.color = if (dark) Color.argb((0.40f * 255).toInt(), 33, 31, 38)
+                         else Color.argb((0.40f * 255).toInt(), 255, 255, 255)
             val strokeAlpha = (((if (dark) 0.58f else 0.75f) * (if (dark) 0.5f else 1f)) * 255).toInt().coerceIn(0, 255)
-            stroke.color = android.graphics.Color.TRANSPARENT
+            stroke.color = Color.TRANSPARENT
             rebuildShader(strokeAlpha)
         }
 
@@ -112,30 +131,27 @@ object MainNav {
                 val l2 = Math.cos(theta - Math.toRadians(90.0)).toFloat()
                 val brightness = (0.12f + l1 * l1 + 0.4f * (l2 * l2)).coerceAtMost(1f)
                 val v = (brightness * 255).toInt().coerceIn(0, 255)
-                colors[i] = android.graphics.Color.argb(strokeAlpha, v, v, v)
+                colors[i] = Color.argb(strokeAlpha, v, v, v)
             }
             strokeColors = colors
         }
 
-        override fun onBoundsChange(bounds: android.graphics.Rect) {
+        override fun onBoundsChange(bounds: Rect) {
             val cx = bounds.exactCenterX()
             val cy = bounds.exactCenterY()
-            strokeColors?.let { stroke.shader = android.graphics.SweepGradient(cx, cy, it, null) }
+            strokeColors?.let { stroke.shader = SweepGradient(cx, cy, it, null) }
             lastCaptureMs = 0L // recapture for the new geometry
         }
 
         override fun draw(canvas: android.graphics.Canvas) {
             val b = bounds
             if (b.isEmpty) return
-            // Backdrop capture (throttled): the provider draws the content view clipped to the
-            // bar's strip; we downscale it hard — the bilinear rescale IS the blur (a cheap
-            // stand-in for LiquidTab's RenderEffect blur, which needs API 31+).
             val now = android.os.SystemClock.uptimeMillis()
             if (now - lastCaptureMs > CAPTURE_INTERVAL_MS) {
                 lastCaptureMs = now
                 backdropProvider?.invoke()?.let { raw ->
-                    val sw = (raw.width / 6f).toInt().coerceAtLeast(1)
-                    val sh = (raw.height / 6f).toInt().coerceAtLeast(1)
+                    val sw = (raw.width / 5f).toInt().coerceAtLeast(1)
+                    val sh = (raw.height / 5f).toInt().coerceAtLeast(1)
                     val small = android.graphics.Bitmap.createScaledBitmap(raw, sw, sh, true)
                     if (small !== raw) raw.recycle()
                     backdrop?.recycle()
@@ -145,19 +161,44 @@ object MainNav {
             rect.set(b)
             path.reset()
             val r = rect.height().coerceAtMost(rect.width()) / 2f
-            path.addRoundRect(rect, r, r, android.graphics.Path.Direction.CW)
+            path.addRoundRect(rect, r, r, Path.Direction.CW)
+
+            // 1. Ambient Drop Shadow (rings the capsule on the outside; clipOutPath prevents dimming the interior)
+            if (Build.VERSION.SDK_INT >= 26) {
+                canvas.save()
+                canvas.clipOutPath(path)
+                canvas.drawPath(path, shadowPaint)
+                canvas.restore()
+            }
+
+            // 2. Refracted Backdrop with Saturation Boost
             canvas.save()
             canvas.clipPath(path)
             backdrop?.let { canvas.drawBitmap(it, null, rect, blurPaint) }
-            // 2. 40% glass fill over the blurred content
+
+            // 3. 40% surface container fill
             canvas.drawRect(rect, fill)
+
+            // 4. LiquidTab Interactive Highlight (RadialGradient centered at the selected tab)
+            if (activeTabCenterX >= 0f) {
+                haloPaint.shader = RadialGradient(
+                    activeTabCenterX,
+                    rect.centerY(),
+                    rect.height() * 1.25f,
+                    Color.argb((0.15f * 255).toInt(), 255, 255, 255),
+                    Color.TRANSPARENT,
+                    Shader.TileMode.CLAMP
+                )
+                canvas.drawPath(path, haloPaint)
+            }
             canvas.restore()
-            // 3. dual-light bloom stroke (inset half the stroke so it isn't clipped)
-            val strokeRect = android.graphics.RectF(rect)
+
+            // 5. Dual-light bloom stroke (inset half the stroke so it isn't clipped)
+            val strokeRect = RectF(rect)
             strokeRect.inset(stroke.strokeWidth * 0.5f, stroke.strokeWidth * 0.5f)
-            val strokePath = android.graphics.Path()
+            val strokePath = Path()
             val sr = strokeRect.height().coerceAtMost(strokeRect.width()) / 2f
-            strokePath.addRoundRect(strokeRect, sr, sr, android.graphics.Path.Direction.CW)
+            strokePath.addRoundRect(strokeRect, sr, sr, Path.Direction.CW)
             canvas.drawPath(strokePath, stroke)
         }
 
@@ -332,7 +373,8 @@ object MainNav {
                 clipToPadding = false
                 // Liquid-glass surface (LiquidTab recipe): 40% fill + dual-light bloom stroke.
                 background = LiquidGlassDrawable(!Settings.lightMode.value)
-                setPadding(10.dp, 2.dp, 10.dp, 2.dp)
+                val padH = if (Settings.mainNavSquare.value) 10.dp else 8.dp
+                setPadding(padH, 2.dp, padH, 2.dp)
                 // Stay hidden until positionBar has placed us (bottom/top); otherwise the bar paints
                 // one frame at its default y=0 (top) before the deferred post moves it down — a visible
                 // flash at the top on every return to the home page in bottom mode.
@@ -346,7 +388,21 @@ object MainNav {
             parent.clipChildren = false
             parent.clipToPadding = false
             val barHeight = barHeightPx()
-            parent.addView(nav, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, barHeight))
+
+            val square = Settings.mainNavSquare.value
+            val labels = Settings.mainNavLabels.value
+            val isSpread = square || labels
+            val navLp = FrameLayout.LayoutParams(
+                if (isSpread) FrameLayout.LayoutParams.MATCH_PARENT else FrameLayout.LayoutParams.WRAP_CONTENT,
+                barHeight
+            ).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                if (isSpread) {
+                    leftMargin = 12.dp
+                    rightMargin = 12.dp
+                }
+            }
+            parent.addView(nav, navLp)
 
             // Liquid glass backdrop: the provider redraws the CONTENT view (the pager — it never
             // contains the nav itself, so no recursion) clipped to the bar's strip, mapped into
@@ -357,17 +413,21 @@ object MainNav {
                     else {
                         val bm = android.graphics.Bitmap.createBitmap(nav.width, nav.height, android.graphics.Bitmap.Config.ARGB_8888)
                         val c = android.graphics.Canvas(bm)
-                        c.translate(
-                            -((nav.left + nav.translationX) - (pagerView.left + pagerView.translationX)),
-                            -((nav.top + nav.translationY) - (pagerView.top + pagerView.translationY)),
-                        )
+                        val navX = nav.left + nav.translationX
+                        val navY = nav.top + nav.translationY
+                        val pagerX = pagerView.left + pagerView.translationX
+                        val pagerY = pagerView.top + pagerView.translationY
+                        c.translate(-(navX - pagerX), -(navY - pagerY))
                         pagerView.draw(c)
                         bm
                     }
                 }.getOrNull()
             }
 
-            pager.observe { render(state) }
+            pager.observe {
+                render(state)
+                ensurePagePadding(pagerView, barHeightPx() + 8.dp + 4.dp)
+            }
             positionBar(parent, pagerView, indicator, nav, barHeight)
 
             ensureListener()
@@ -493,7 +553,7 @@ object MainNav {
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE; cornerRadius = 9999f; setColor(PILL_COLOR)
                     // Liquid-glass pill highlight: a faint white bloom edge (LiquidTab indicator).
-                    setStroke(1.dp, 0x2EFFFFFF)
+                    setStroke(1.dp, 0x4DFFFFFF)
                 }
                 visibility = View.GONE
             }
@@ -526,7 +586,7 @@ object MainNav {
                 LinearLayout.LayoutParams(0, barHeight, 1f)
             } else {
                 LinearLayout.LayoutParams(cellW, barHeight).apply {
-                    marginStart = 2.dp; marginEnd = 2.dp
+                    marginStart = 1.dp; marginEnd = 1.dp
                 }
             }
             nav.addView(frame, lp)
@@ -553,7 +613,7 @@ object MainNav {
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE; cornerRadius = 9999f; setColor(PILL_COLOR)
                     // Liquid-glass pill highlight: a faint white bloom edge (LiquidTab indicator).
-                    setStroke(1.dp, 0x2EFFFFFF)
+                    setStroke(1.dp, 0x4DFFFFFF)
                 }
                 visibility = View.GONE
             }
@@ -602,16 +662,62 @@ object MainNav {
         }
     }
 
+    private fun updateNavLayoutParams(state: NavState) {
+        val nav = state.nav
+        val barHeight = barHeightPx()
+        val square = Settings.mainNavSquare.value
+        val labels = Settings.mainNavLabels.value
+        val isSpread = square || labels
+        val padH = if (square) 10.dp else 8.dp
+        nav.setPadding(padH, 2.dp, padH, 2.dp)
+        val lp = nav.layoutParams as? FrameLayout.LayoutParams
+            ?: FrameLayout.LayoutParams(
+                if (isSpread) FrameLayout.LayoutParams.MATCH_PARENT else FrameLayout.LayoutParams.WRAP_CONTENT,
+                barHeight
+            )
+        lp.height = barHeight
+        if (isSpread) {
+            lp.width = FrameLayout.LayoutParams.MATCH_PARENT
+            lp.gravity = Gravity.CENTER_HORIZONTAL
+            lp.leftMargin = 12.dp
+            lp.rightMargin = 12.dp
+        } else {
+            lp.width = FrameLayout.LayoutParams.WRAP_CONTENT
+            lp.gravity = Gravity.CENTER_HORIZONTAL
+            lp.leftMargin = 0
+            lp.rightMargin = 0
+        }
+        nav.layoutParams = lp
+        val gap = 8.dp
+        val parent = nav.parent as? View
+        if (parent != null && parent.height > 0) {
+            if (Settings.bottomMainNav.value) {
+                nav.translationY = (parent.height - barHeight - gap).toFloat()
+            } else {
+                nav.translationY = gap.toFloat()
+            }
+            if (!isSpread) {
+                val nw = nav.measuredWidth.takeIf { it > 0 } ?: nav.width
+                if (nw > 0 && parent.width > nw) {
+                    nav.translationX = ((parent.width - nw) / 2f) - nav.left.toFloat()
+                }
+            } else {
+                nav.translationX = 0f
+            }
+        }
+    }
+
     private fun render(state: NavState, force: Boolean = false) {
         // Rebuild the cells when a layout-affecting setting changed since they were built
-        // (铺开 / 文字标签 / 显示所有图标 / 导航高度) — otherwise those switches wouldn't apply
-        // until the home page's view was recreated.
+        // (铺开 / 文字标签 / 显示所有图标 / 导航高度 / 位置) — apply immediately to layout & cells.
         val layoutKey = "${Settings.mainNavSquare.value}|${Settings.mainNavLabels.value}|" +
-            "${Settings.mainNavAllIcons.value}|${Settings.mainNavHeight.value}"
+            "${Settings.mainNavAllIcons.value}|${Settings.mainNavHeight.value}|${Settings.bottomMainNav.value}"
         if (layoutKey != state.layoutKey) {
             state.layoutKey = layoutKey
+            updateNavLayoutParams(state)
             buildCells(state)
             state.renderedKey = ""
+            state.nav.requestLayout()
         }
         // Labeled (phone) mode is a standard bottom nav: always show every page's icon+label.
         val allIcons = Settings.mainNavAllIcons.value || Settings.mainNavLabels.value
@@ -638,6 +744,16 @@ object MainNav {
                 cell.badge.visibility = View.VISIBLE
             } else {
                 cell.badge.visibility = View.GONE
+            }
+        }
+        val currentCell = state.cells.getOrNull(state.current)
+        if (currentCell != null) {
+            currentCell.frame.post {
+                val cx = currentCell.frame.left + currentCell.frame.width / 2f
+                (state.nav.background as? LiquidGlassDrawable)?.let { bg ->
+                    bg.activeTabCenterX = cx
+                    bg.invalidateSelf()
+                }
             }
         }
     }
@@ -830,50 +946,71 @@ object MainNav {
         rv.smoothScrollToStart(0)
     }
 
+    /** Ensure page list content extends behind the floating bar without the last row being occluded. */
+    private fun ensurePagePadding(pagerView: View, bottomPad: Int) {
+        runCatching {
+            val root = pagerView as? ViewGroup ?: return
+            val rvs = root.findAll { it is RecyclerView }
+            for (v in rvs) {
+                val rv = v as? RecyclerView ?: continue
+                if (rv.clipToPadding) rv.clipToPadding = false
+                if (rv.paddingBottom < bottomPad) {
+                    rv.setPadding(rv.paddingLeft, rv.paddingTop, rv.paddingRight, bottomPad)
+                }
+            }
+        }
+    }
+
     /**
-     * Reserve a band for the bar (bottom or top) by shrinking the pager and sliding the bar into the
-     * freed space — so the nav never floats over the page content in either mode.
+     * Position the floating liquid-glass capsule above the page content. Content pager
+     * stays full-bleed underneath so the semi-transparent glass refracts live scrolling items.
      */
     private fun positionBar(
         parent: ViewGroup, pagerView: View, indicator: View, nav: LinearLayout, barHeight: Int,
     ) {
-        // Position + reveal BEFORE each draw (not via post): a post() leaves the INVISIBLE bar
-        // unplaced for one painted frame, which shows as a band flashing before the bar appears.
-        // OnPreDraw runs after layout but before that draw, so the bar is placed and visible on the
-        // very first painted frame of the returned page.
-        //
-        // The listener is PERSISTENT (not one-shot) and re-runs whenever parent.height or
-        // pagerView.top changes: on a cold start those settle over several frames (window insets /
-        // round-screen chin), and a one-shot listener would lock in an intermediate value — leaving a
-        // black band at the top because pagerView.translationY was computed against a stale top=0. It
-        // is cheap when stable (a single equality check) and stops firing once this nav is removed.
         var lastH = -1
+        var lastW = -1
         var lastTop = Int.MIN_VALUE
+        val gap = 8.dp
         nav.viewTreeObserver.addOnPreDrawListener(
             object : android.view.ViewTreeObserver.OnPreDrawListener {
                 override fun onPreDraw(): Boolean {
                     val h = parent.height
+                    val w = parent.width
                     val top = pagerView.top
-                    if (h <= 0) return true                     // not measured yet; retry next frame
-                    if (h == lastH && top == lastTop) return true   // already positioned for this size
-                    lastH = h; lastTop = top
+                    if (h <= 0 || w <= 0) return true
+                    if (h == lastH && w == lastW && top == lastTop) return true
+                    lastH = h; lastW = w; lastTop = top
                     runCatching {
-                        if (pagerView.layoutParams.height != h - barHeight) {
-                            pagerView.layoutParams =
-                                pagerView.layoutParams.apply { height = h - barHeight }
+                        // 1. Keep content pager full-bleed so content extends and scrolls behind the glass bar
+                        if (pagerView.layoutParams.height != ViewGroup.LayoutParams.MATCH_PARENT &&
+                            pagerView.layoutParams.height != h
+                        ) {
+                            pagerView.layoutParams = pagerView.layoutParams.apply { height = ViewGroup.LayoutParams.MATCH_PARENT }
                             pagerView.requestLayout()
                         }
+                        pagerView.translationY = 0f
+
+                        // 2. Float the bar above the screen bottom/top with gap
                         if (Settings.bottomMainNav.value) {
-                            // Bar at the bottom; content flush to the top.
-                            nav.translationY = (h - barHeight).toFloat()
-                            pagerView.translationY = -top.toFloat()
+                            nav.translationY = (h - barHeight - gap).toFloat()
                         } else {
-                            // Bar at the top; push content down below it.
-                            nav.translationY = 0f
-                            pagerView.translationY = (barHeight - top).toFloat()
+                            nav.translationY = gap.toFloat()
                         }
-                        // Position is set; reveal now so the bar never flashes at a pre-positioned spot.
+
+                        // 3. Center horizontally for wrap_content capsule island
+                        val isSpread = Settings.mainNavSquare.value || Settings.mainNavLabels.value
+                        if (!isSpread) {
+                            val nw = nav.measuredWidth.takeIf { it > 0 } ?: nav.width
+                            if (nw > 0 && w > nw) {
+                                nav.translationX = ((w - nw) / 2f) - nav.left.toFloat()
+                            }
+                        } else {
+                            nav.translationX = 0f
+                        }
+
                         nav.visibility = View.VISIBLE
+                        ensurePagePadding(pagerView, barHeight + gap + 4.dp)
                     }.onFailure {
                         // Never leave the bar stuck invisible if positioning threw.
                         nav.visibility = View.VISIBLE
