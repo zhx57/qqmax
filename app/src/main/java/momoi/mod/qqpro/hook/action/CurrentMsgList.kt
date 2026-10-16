@@ -26,43 +26,28 @@ import java.util.LinkedList
 
 object CurrentMsgList {
     /**
-     * Anti-recall vault: caches the PRE-recall message for every message that flows through the
-     * list merge (per peer, per msgId), in memory AND on disk.
+     * Anti-recall vault: caches the PRE-recall **item** for every message that flows through the
+     * list merge (per peer, per msgId). Survives chat re-entry (same process).
      *
      * Why not patch QQ's own database: the NT message DB is encrypted (key held by the native
      * kernel), its records are internal protobuf blobs, the kernel keeps its own cached connection
      * (external writes risk corrupting the whole store), and — decisively — the SERVER is the
-     * source of truth: any local patch would be overwritten by the next server sync. So instead we
-     * persist OUR OWN snapshot file (plain JSON in our private dir) and rebuild an equivalent
-     * in-memory MsgRecord on load. That survives chat re-entry AND full app restarts.
+     * source of truth: any local patch would be overwritten by the next server sync.
      *
-     * Non-text messages degrade to a text placeholder ("[图片]" etc.) on disk restore; the in-
-     * memory snapshot keeps full fidelity for the same session.
+     * Why the vault stores the ITEM and not a rebuilt MsgRecord: the AIO cell factory picks the
+     * bind cell via a VIRTUAL method on the item (base [WatchAIOMsgItem] falls through to the
+     * "unsupported" cell, which hard-casts the item to its own subclass). A synthetic base-class
+     * item therefore crashes with ClassCastException in WatchUnSupportItemCell. The ORIGINAL item
+     * keeps its concrete subclass, so re-binding it is always type-correct.
+     *
+     * Known limit: the vault is in-memory — a full app restart loses it (the kernel has already
+     * replaced the persisted content server-side; there is nothing left to restore from).
      */
     object AntiRecallVault {
-        private val byPeer = HashMap<String, LinkedHashMap<Long, com.tencent.qqnt.kernel.nativeinterface.MsgRecord>>()
-        private val diskFile by lazy { java.io.File(Utils.application.filesDir, "qqpro_recall_vault.json") }
+        private val byPeer = HashMap<String, LinkedHashMap<Long, WatchAIOMsgItem>>()
 
-        /** Extract a readable text summary from a record's elements (read-only, no mutation). */
-        private fun textOf(r: com.tencent.qqnt.kernel.nativeinterface.MsgRecord): String {
-            val sb = StringBuilder()
-            for (ele in r.elements.orEmpty()) {
-                ele.textElement?.content?.let { sb.append(it) }
-                ele.faceElement?.faceText?.let { sb.append(it) }
-                ele.marketFaceElement?.faceName?.let { sb.append(it) }
-                if (ele.picElement != null) sb.append("[图片]")
-                if (ele.pttElement != null) sb.append("[语音]")
-                if (ele.videoElement != null) sb.append("[视频]")
-                if (ele.fileElement != null) sb.append("[文件]")
-                ele.arkElement?.bytesData?.let { data ->
-                    runCatching { momoi.mod.qqpro.util.Json(data).str("prompt") }
-                        .getOrNull()?.let { sb.append(it) }
-                }
-            }
-            return sb.toString().ifBlank { "[消息]" }
-        }
-
-        fun put(r: com.tencent.qqnt.kernel.nativeinterface.MsgRecord) {
+        fun put(item: WatchAIOMsgItem) {
+            val r = item.d
             if (r.recallTime > 0L) return // never cache the recalled form
             val peer = r.peerUid ?: return
             synchronized(byPeer) {
@@ -73,71 +58,15 @@ object CurrentMsgList {
                     byPeer[peer] = map
                 }
                 map.remove(r.msgId)
-                map[r.msgId] = r
+                map[r.msgId] = item
                 while (map.size > 120) map.remove(map.keys.first())
             }
-            // Persist asynchronously into OUR private JSON file (QQ's own DB is never touched).
-            Thread {
-                runCatching {
-                    val root = org.json.JSONObject(if (diskFile.exists()) diskFile.readText() else "{}")
-                    val peerObj = root.optJSONObject(peer) ?: org.json.JSONObject()
-                    val entry = org.json.JSONObject()
-                        .put("seq", r.msgSeq)
-                        .put("senderUid", r.senderUid ?: "")
-                        .put("senderUin", r.senderUin)
-                        .put("time", r.msgTime)
-                        .put("chatType", r.chatType)
-                        .put("text", textOf(r))
-                    peerObj.put(r.msgId.toString(), entry)
-                    // Bound the disk file: keep the newest 60 entries per peer.
-                    while (peerObj.length() > 60) {
-                        val oldest = peerObj.keys().asSequence()
-                            .minByOrNull { peerObj.optJSONObject(it)?.optLong("time") ?: 0L }
-                        peerObj.remove(oldest)
-                    }
-                    root.put(peer, peerObj)
-                    diskFile.writeText(root.toString())
-                }.onFailure { Utils.log("AntiRecallVault: persist failed: ${it.message}") }
-            }.start()
         }
 
-        /** The cached pre-recall record for [msgId] in [peerUid]: memory first, then disk. */
-        fun restore(peerUid: String?, msgId: Long): com.tencent.qqnt.kernel.nativeinterface.MsgRecord? {
+        /** The cached pre-recall ITEM for [msgId] in [peerUid], or null. */
+        fun restoreItem(peerUid: String?, msgId: Long): WatchAIOMsgItem? {
             if (peerUid == null) return null
-            synchronized(byPeer) { byPeer[peerUid]?.get(msgId) }?.let { return it }
-            // Disk fallback → rebuild an equivalent in-memory record (text form).
-            val snap = runCatching {
-                val root = org.json.JSONObject(if (diskFile.exists()) diskFile.readText() else "{}")
-                val entry = root.optJSONObject(peerUid)?.optJSONObject(msgId.toString()) ?: return null
-                val rec = com.tencent.qqnt.kernel.nativeinterface.MsgRecord()
-                rec.msgId = msgId
-                rec.msgSeq = entry.optLong("seq")
-                rec.senderUid = entry.optString("senderUid")
-                rec.senderUin = entry.optLong("senderUin")
-                rec.msgTime = entry.optLong("time")
-                rec.chatType = entry.optInt("chatType")
-                rec.peerUid = peerUid
-                rec.msgType = 1 // text
-                rec.recallTime = 0L
-                val ele = com.tencent.qqnt.kernel.nativeinterface.MsgElement()
-                ele.elementType = momoi.mod.qqpro.enums.ElementType.TEXT
-                ele.textElement = com.tencent.qqnt.kernel.nativeinterface.TextElement().apply {
-                    content = entry.optString("text")
-                }
-                rec.elements = arrayListOf(ele)
-                rec
-            }.getOrElse {
-                Utils.log("AntiRecallVault: disk restore failed: ${it.message}")
-                null
-            }
-            if (snap != null) {
-                synchronized(byPeer) {
-                    var map = byPeer[peerUid]
-                    if (map == null) { map = LinkedHashMap(); byPeer[peerUid] = map }
-                    map[msgId] = snap
-                }
-            }
-            return snap
+            return synchronized(byPeer) { byPeer[peerUid]?.get(msgId) }
         }
 
         fun clear() = synchronized(byPeer) { byPeer.clear() }
@@ -512,9 +441,10 @@ object CurrentMsgList {
                 while (mi < msg.size && msg[mi].d.msgSeq < seq) { merged.add(msg[mi]); mi++ }
             }
             for (item in list) {
-                // Cache the PRE-recall record BEFORE the recall branches handle it (per peer, per
-                // msgId). See [AntiRecallVault].
-                AntiRecallVault.put(item.d)
+                // Cache the PRE-recall ITEM before the recall branches handle it (per peer, per
+                // msgId). The vault stores the item itself — see [AntiRecallVault] for why a
+                // rebuilt MsgRecord would crash the cell factory.
+                AntiRecallVault.put(item)
                 val j = indexById[item.d.msgId]
                 if (j != null && j >= mi) {
                     // Anti-recall, peer recalls only: a recall arrives as an update of the ORIGINAL
@@ -536,18 +466,20 @@ object CurrentMsgList {
                 } else if (j == null) {
                     // Anti-recall on reload: the kernel DB keeps the peer-recalled record (with
                     // recallTime > 0) — and its original content may already be replaced server-
-                    // side. If we still hold the pre-recall snapshot, substitute the SNAPSHOT
-                    // record for the loaded one so the original renders again; otherwise clear the
-                    // flag as a best-effort fallback. The recall gray tip still loads below it as
+                    // side. If we still hold the pre-recall snapshot, substitute the ORIGINAL ITEM
+                    // for the loaded one so the original renders again (the item keeps its concrete
+                    // subclass, so the cell factory stays type-correct). Without a snapshot (e.g.
+                    // after an app restart), leave the loaded item untouched — rebuilding one would
+                    // crash in WatchUnSupportItemCell. The recall gray tip still loads below it as
                     // the notice.
                     if (momoi.mod.qqpro.Settings.antiRecall.value &&
                         item.d.recallTime > 0L && item.d.senderUid != SelfContact.peerUid
                     ) {
-                        val snap = AntiRecallVault.restore(item.d.peerUid, item.d.msgId)
+                        val snap = AntiRecallVault.restoreItem(item.d.peerUid, item.d.msgId)
                         if (snap != null) {
                             Utils.log("MsgList.n: antiRecall restored msgId=${item.d.msgId} from vault on load")
-                            flushMirrorOlderThan(snap.msgSeq)
-                            merged.add(WatchAIOMsgItem(snap))
+                            flushMirrorOlderThan(snap.d.msgSeq)
+                            merged.add(snap)
                             continue
                         }
                         item.d.recallTime = 0L

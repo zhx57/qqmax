@@ -77,9 +77,21 @@ object MainNav {
             style = android.graphics.Paint.Style.STROKE
             strokeWidth = 1.dp.toFloat()
         }
+        private val blurPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or
+            android.graphics.Paint.FILTER_BITMAP_FLAG)
         private val path = android.graphics.Path()
         private val rect = android.graphics.RectF()
         private var strokeColors: IntArray? = null
+
+        /**
+         * Called from draw() to grab the content currently behind the bar (the caller owns the
+         * coordinate mapping and returns a bar-sized bitmap, or null). Throttled: the backdrop is
+         * re-captured at most every [CAPTURE_INTERVAL_MS] — a glass surface does not need the
+         * content behind it at 60 fps, and the capture redraws the whole content view.
+         */
+        var backdropProvider: (() -> android.graphics.Bitmap?)? = null
+        private var backdrop: android.graphics.Bitmap? = null
+        private var lastCaptureMs = 0L
 
         init {
             fill.color = if (dark) android.graphics.Color.argb((0.40f * 255).toInt(), 33, 31, 38)
@@ -109,25 +121,54 @@ object MainNav {
             val cx = bounds.exactCenterX()
             val cy = bounds.exactCenterY()
             strokeColors?.let { stroke.shader = android.graphics.SweepGradient(cx, cy, it, null) }
+            lastCaptureMs = 0L // recapture for the new geometry
         }
 
         override fun draw(canvas: android.graphics.Canvas) {
             val b = bounds
             if (b.isEmpty) return
+            // Backdrop capture (throttled): the provider draws the content view clipped to the
+            // bar's strip; we downscale it hard — the bilinear rescale IS the blur (a cheap
+            // stand-in for LiquidTab's RenderEffect blur, which needs API 31+).
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastCaptureMs > CAPTURE_INTERVAL_MS) {
+                lastCaptureMs = now
+                backdropProvider?.invoke()?.let { raw ->
+                    val sw = (raw.width / 6f).toInt().coerceAtLeast(1)
+                    val sh = (raw.height / 6f).toInt().coerceAtLeast(1)
+                    val small = android.graphics.Bitmap.createScaledBitmap(raw, sw, sh, true)
+                    if (small !== raw) raw.recycle()
+                    backdrop?.recycle()
+                    backdrop = small
+                }
+            }
             rect.set(b)
-            val inset = stroke.strokeWidth * 0.5f
-            rect.inset(inset, inset)
             path.reset()
             val r = rect.height().coerceAtMost(rect.width()) / 2f
             path.addRoundRect(rect, r, r, android.graphics.Path.Direction.CW)
-            canvas.drawPath(path, fill)
-            canvas.drawPath(path, stroke)
+            canvas.save()
+            canvas.clipPath(path)
+            backdrop?.let { canvas.drawBitmap(it, null, rect, blurPaint) }
+            // 2. 40% glass fill over the blurred content
+            canvas.drawRect(rect, fill)
+            canvas.restore()
+            // 3. dual-light bloom stroke (inset half the stroke so it isn't clipped)
+            val strokeRect = android.graphics.RectF(rect)
+            strokeRect.inset(stroke.strokeWidth * 0.5f, stroke.strokeWidth * 0.5f)
+            val strokePath = android.graphics.Path()
+            val sr = strokeRect.height().coerceAtMost(strokeRect.width()) / 2f
+            strokePath.addRoundRect(strokeRect, sr, sr, android.graphics.Path.Direction.CW)
+            canvas.drawPath(strokePath, stroke)
         }
 
         override fun setAlpha(alpha: Int) {}
         override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
         @Deprecated("Deprecated in Java")
         override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
+
+        private companion object {
+            const val CAPTURE_INTERVAL_MS = 90L
+        }
     }
 
     private val BADGE_COLOR get() = M3.badge
@@ -171,6 +212,9 @@ object MainNav {
     ) {
         val cells = ArrayList<Cell>()
         var current = 0
+        // Signature of the layout-affecting settings (铺开/标签/图标数/高度) the cells were built
+        // with; render() rebuilds the cells when it changes, so those switches apply instantly.
+        var layoutKey = ""
         // Last fully-rendered (page, unread-signature) so the high-frequency scroll listener only
         // re-styles when something actually changed.
         var renderedKey = ""
@@ -303,6 +347,25 @@ object MainNav {
             parent.clipToPadding = false
             val barHeight = barHeightPx()
             parent.addView(nav, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, barHeight))
+
+            // Liquid glass backdrop: the provider redraws the CONTENT view (the pager — it never
+            // contains the nav itself, so no recursion) clipped to the bar's strip, mapped into
+            // the pager's coordinate space. The drawable throttles the capture to ~11 fps.
+            (nav.background as? LiquidGlassDrawable)?.backdropProvider = {
+                runCatching {
+                    if (!nav.isShown || pagerView.width <= 0 || nav.width <= 0 || nav.height <= 0) null
+                    else {
+                        val bm = android.graphics.Bitmap.createBitmap(nav.width, nav.height, android.graphics.Bitmap.Config.ARGB_8888)
+                        val c = android.graphics.Canvas(bm)
+                        c.translate(
+                            -((nav.left + nav.translationX) - (pagerView.left + pagerView.translationX)),
+                            -((nav.top + nav.translationY) - (pagerView.top + pagerView.translationY)),
+                        )
+                        pagerView.draw(c)
+                        bm
+                    }
+                }.getOrNull()
+            }
 
             pager.observe { render(state) }
             positionBar(parent, pagerView, indicator, nav, barHeight)
@@ -540,6 +603,16 @@ object MainNav {
     }
 
     private fun render(state: NavState, force: Boolean = false) {
+        // Rebuild the cells when a layout-affecting setting changed since they were built
+        // (铺开 / 文字标签 / 显示所有图标 / 导航高度) — otherwise those switches wouldn't apply
+        // until the home page's view was recreated.
+        val layoutKey = "${Settings.mainNavSquare.value}|${Settings.mainNavLabels.value}|" +
+            "${Settings.mainNavAllIcons.value}|${Settings.mainNavHeight.value}"
+        if (layoutKey != state.layoutKey) {
+            state.layoutKey = layoutKey
+            buildCells(state)
+            state.renderedKey = ""
+        }
         // Labeled (phone) mode is a standard bottom nav: always show every page's icon+label.
         val allIcons = Settings.mainNavAllIcons.value || Settings.mainNavLabels.value
         val showUnread = Settings.mainNavUnread.value
