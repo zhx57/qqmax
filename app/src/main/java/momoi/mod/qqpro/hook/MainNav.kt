@@ -118,11 +118,25 @@ object MainNav {
             setShadowLayer(8.dp.toFloat(), 0f, 2.dp.toFloat(), if (dark) 0x33000000 else 0x1A000000)
         }
         private val backdropPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        private val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0x28FFFFFF
+        }
+        private val pillStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 1.dp.toFloat()
+            color = 0x4DFFFFFF
+        }
         private val path = Path()
         private val rect = RectF()
+        private val pillRect = RectF()
 
         /** Real-time dynamic blurred backdrop captured from the underlying content. */
         var backdropBitmap: Bitmap? = null
+
+        /** Continuous floating crystal pill metrics */
+        var pillCenterX: Float = -1f
+        var pillWidth: Float = 0f
+        var pillHeight: Float = 0f
 
         /** Center X coordinate of the active tab for rendering the interactive highlight bloom. */
         var activeTabCenterX: Float = -1f
@@ -194,7 +208,19 @@ object MainNav {
             // 4. WeChat-LiquidGlass specular gloss
             canvas.drawRect(rect, glossPaint)
 
-            // 5. Interactive highlight: soft radial bloom behind the selected tab
+            // 5. Continuous gliding crystal droplet pill
+            if (pillCenterX >= 0f && pillWidth > 0f && pillHeight > 0f) {
+                val pl = pillCenterX - pillWidth / 2f
+                val pt = rect.centerY() - pillHeight / 2f
+                val pr = pillCenterX + pillWidth / 2f
+                val pb = rect.centerY() + pillHeight / 2f
+                pillRect.set(pl, pt, pr, pb)
+                val pillR = pillHeight / 2f
+                canvas.drawRoundRect(pillRect, pillR, pillR, pillPaint)
+                canvas.drawRoundRect(pillRect, pillR, pillR, pillStrokePaint)
+            }
+
+            // 6. Interactive highlight: soft radial bloom behind the selected tab
             if (activeTabCenterX >= 0f) {
                 haloPaint.shader = RadialGradient(
                     activeTabCenterX,
@@ -656,20 +682,21 @@ object MainNav {
                             val progress = ((localX - tabW * 0.5f) / activeSpan).coerceIn(0f, 1f) * (pageCount - 1)
 
                             if (internalPagerRv != null) {
-                                val targetScrollX = Math.round(progress * pw)
+                                val maxScroll = ((pageCount - 1) * pw).toInt().coerceAtLeast(0)
+                                val targetScrollX = Math.round(progress * pw).toInt().coerceIn(0, maxScroll)
                                 val currentScrollX = internalPagerRv.computeHorizontalScrollOffset()
                                 val delta = targetScrollX - currentScrollX
                                 if (delta != 0) {
                                     internalPagerRv.scrollBy(delta, 0)
                                 }
-                            } else {
-                                val spanRatio = (pw * (pageCount - 1).coerceAtLeast(1)) / nw
-                                val scrollDelta = (dx * spanRatio).toInt()
-                                if (!pager.isFakeDragging()) pager.beginFakeDrag()
-                                pager.fakeDragBy(-scrollDelta.toFloat())
                             }
 
                             (nav.background as? LiquidGlassDrawable)?.let { bg ->
+                                pillAnimator?.cancel()
+                                val iconSize = Settings.mainNavHeight.value.toInt().coerceIn(8, 64).dp
+                                bg.pillWidth = (iconSize * 1.6f)
+                                bg.pillHeight = (iconSize + 6.dp).toFloat()
+                                bg.pillCenterX = localX
                                 bg.activeTabCenterX = localX
                                 bg.invalidateSelf()
                             }
@@ -680,8 +707,6 @@ object MainNav {
                                 state.cells.forEachIndexed { i, cell ->
                                     val sel = i == targetIndex
                                     cell.label?.setTextColor(if (sel) ACCENT else IDLE_ICON)
-                                    cell.pill.visibility = if (sel) View.VISIBLE else View.GONE
-                                    cell.pill.alpha = 1f
                                     cell.icon.setColorFilter(if (sel) ACCENT else IDLE_ICON)
                                     cell.icon.scaleX = if (sel) 1.1f else 1.0f
                                     cell.icon.scaleY = if (sel) 1.1f else 1.0f
@@ -694,9 +719,6 @@ object MainNav {
                     android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                         if (isDragging) {
                             isDragging = false
-                            if (internalPagerRv == null && pager.isFakeDragging()) {
-                                pager.endFakeDrag()
-                            }
                             val nw = nav.width.toFloat().coerceAtLeast(1f)
                             val tabW = nw / pageCount.toFloat().coerceAtLeast(1f)
                             val activeSpan = (nw - tabW).coerceAtLeast(1f)
@@ -704,6 +726,11 @@ object MainNav {
                             val progress = ((localX - tabW * 0.5f) / activeSpan).coerceIn(0f, 1f) * (pageCount - 1)
                             val targetIndex = Math.round(progress).toInt().coerceIn(0, pageCount - 1)
                             pager.setCurrent(targetIndex)
+                            (nav.background as? LiquidGlassDrawable)?.let { bg ->
+                                val targetCenterX = state.cells.getOrNull(targetIndex)?.frame?.let { it.left + it.width / 2f }
+                                    ?: (tabW * (targetIndex + 0.5f))
+                                animatePillTo(bg, targetCenterX, animate = true)
+                            }
                             render(state, force = true)
                             BlurEngine.capture(nav, pagerView)
                         }
@@ -1031,6 +1058,30 @@ object MainNav {
         nav.requestLayout()
     }
 
+    private var pillAnimator: ValueAnimator? = null
+
+    private fun animatePillTo(bg: LiquidGlassDrawable, targetX: Float, animate: Boolean) {
+        pillAnimator?.cancel()
+        if (!animate || bg.pillCenterX < 0f || Math.abs(bg.pillCenterX - targetX) < 1f) {
+            bg.pillCenterX = targetX
+            bg.activeTabCenterX = targetX
+            bg.invalidateSelf()
+            return
+        }
+        val startX = bg.pillCenterX
+        pillAnimator = ValueAnimator.ofFloat(startX, targetX).apply {
+            duration = DUR_IN
+            interpolator = EMPHASIZED
+            addUpdateListener {
+                val v = it.animatedValue as Float
+                bg.pillCenterX = v
+                bg.activeTabCenterX = v
+                bg.invalidateSelf()
+            }
+            start()
+        }
+    }
+
     private fun render(state: NavState, force: Boolean = false) {
         // Rebuild the cells when a layout-affecting setting changed since they were built
         // (铺开 / 文字标签 / 显示所有图标 / 导航高度 / 位置) — apply immediately to layout & cells.
@@ -1075,8 +1126,10 @@ object MainNav {
             currentCell.frame.post {
                 val cx = currentCell.frame.left + currentCell.frame.width / 2f
                 (state.nav.background as? LiquidGlassDrawable)?.let { bg ->
-                    bg.activeTabCenterX = cx
-                    bg.invalidateSelf()
+                    val iconSize = Settings.mainNavHeight.value.toInt().coerceIn(8, 64).dp
+                    bg.pillWidth = (iconSize * 1.6f)
+                    bg.pillHeight = (iconSize + 6.dp).toFloat()
+                    animatePillTo(bg, cx, animate)
                 }
             }
         }
@@ -1091,29 +1144,8 @@ object MainNav {
         crossfade(cell.icon, showIcon, animate)
         crossfade(cell.dot, !showIcon, animate)
 
-        // M3 active indicator: the pill scales + fades in behind the selected icon, out otherwise.
-        val pillShown = selected && showIcon
-        if (pillShown) {
-            if (cell.pill.visibility != View.VISIBLE || cell.pill.alpha < 1f) {
-                cell.pill.visibility = View.VISIBLE
-                if (animate) {
-                    cell.pill.alpha = 0f; cell.pill.scaleX = 0.55f; cell.pill.scaleY = 0.85f
-                    cell.pill.animate().alpha(1f).scaleX(1f).scaleY(1f)
-                        .setDuration(DUR_IN).setInterpolator(EMPHASIZED).start()
-                } else {
-                    cell.pill.alpha = 1f; cell.pill.scaleX = 1f; cell.pill.scaleY = 1f
-                }
-            }
-        } else if (cell.pill.visibility == View.VISIBLE) {
-            if (animate) {
-                cell.pill.animate().alpha(0f).scaleX(0.55f).scaleY(0.85f)
-                    .setDuration(DUR_OUT).setInterpolator(EMPHASIZED)
-                    .withEndAction { cell.pill.visibility = View.GONE }.start()
-            } else {
-                cell.pill.visibility = View.GONE
-                cell.pill.alpha = 1f; cell.pill.scaleX = 1f; cell.pill.scaleY = 1f
-            }
-        }
+        // Pill is handled by the single gliding crystal pill in LiquidGlassDrawable
+        cell.pill.visibility = View.GONE
 
         // Colors: icon tint crossfades idle↔accent (+ 1.1x focus scale matching WeChat-LiquidGlass)
         if (showIcon) {
