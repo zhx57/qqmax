@@ -2,6 +2,8 @@ package momoi.mod.qqpro.hook
 
 import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
@@ -90,8 +92,12 @@ object MainNav {
             color = Color.BLACK
             setShadowLayer(8.dp.toFloat(), 0f, 2.dp.toFloat(), if (dark) 0x33000000 else 0x1A000000)
         }
+        private val backdropPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         private val path = Path()
         private val rect = RectF()
+
+        /** Real-time dynamic blurred backdrop captured from the underlying content. */
+        var backdropBitmap: Bitmap? = null
 
         /** Center X coordinate of the active tab for rendering the interactive highlight bloom. */
         var activeTabCenterX: Float = -1f
@@ -149,13 +155,21 @@ object MainNav {
             canvas.save()
             canvas.clipPath(path)
 
-            // 2. WeChat-LiquidGlass surface fill
+            // 2. Real-time dynamic blurred backdrop
+            backdropBitmap?.let { bmp ->
+                if (!bmp.isRecycled) {
+                    val src = Rect(0, 0, bmp.width, bmp.height)
+                    canvas.drawBitmap(bmp, src, rect, backdropPaint)
+                }
+            }
+
+            // 3. WeChat-LiquidGlass surface fill
             canvas.drawRect(rect, surfacePaint)
 
-            // 3. WeChat-LiquidGlass specular gloss
+            // 4. WeChat-LiquidGlass specular gloss
             canvas.drawRect(rect, glossPaint)
 
-            // 4. Interactive highlight: soft radial bloom behind the selected tab
+            // 5. Interactive highlight: soft radial bloom behind the selected tab
             if (activeTabCenterX >= 0f) {
                 haloPaint.shader = RadialGradient(
                     activeTabCenterX,
@@ -182,6 +196,152 @@ object MainNav {
         override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
         @Deprecated("Deprecated in Java")
         override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
+    }
+
+    /** High-performance 3-pass BoxBlur approximating Gaussian blur on downscaled bitmap. */
+    private object StackBlur {
+        fun blur(bmp: Bitmap, radius: Int) {
+            val w = bmp.width
+            val h = bmp.height
+            if (w <= 0 || h <= 0 || radius < 1) return
+            val pixels = IntArray(w * h)
+            bmp.getPixels(pixels, 0, w, 0, 0, w, h)
+            val temp = IntArray(w * h)
+            val wm = w - 1
+            val hm = h - 1
+            val div = radius + radius + 1
+            for (pass in 0 until 3) {
+                boxBlurH(pixels, temp, w, h, radius, wm, div)
+                boxBlurV(temp, pixels, w, h, radius, hm, div)
+            }
+            bmp.setPixels(pixels, 0, w, 0, 0, w, h)
+        }
+
+        private fun boxBlurH(src: IntArray, dst: IntArray, w: Int, h: Int, radius: Int, wm: Int, div: Int) {
+            for (y in 0 until h) {
+                val rowStart = y * w
+                var aSum = 0; var rSum = 0; var gSum = 0; var bSum = 0
+                for (i in -radius..radius) {
+                    val p = src[rowStart + Math.min(wm, Math.max(0, i))]
+                    aSum += (p ushr 24) and 0xFF
+                    rSum += (p ushr 16) and 0xFF
+                    gSum += (p ushr 8) and 0xFF
+                    bSum += p and 0xFF
+                }
+                for (x in 0 until w) {
+                    dst[rowStart + x] = ((aSum / div) shl 24) or
+                            ((rSum / div) shl 16) or
+                            ((gSum / div) shl 8) or
+                            (bSum / div)
+                    val outX = Math.max(x - radius, 0)
+                    val inX = Math.min(x + radius + 1, wm)
+                    val pOut = src[rowStart + outX]
+                    val pIn = src[rowStart + inX]
+                    aSum += ((pIn ushr 24) and 0xFF) - ((pOut ushr 24) and 0xFF)
+                    rSum += ((pIn ushr 16) and 0xFF) - ((pOut ushr 16) and 0xFF)
+                    gSum += ((pIn ushr 8) and 0xFF) - ((pOut ushr 8) and 0xFF)
+                    bSum += (pIn and 0xFF) - (pOut and 0xFF)
+                }
+            }
+        }
+
+        private fun boxBlurV(src: IntArray, dst: IntArray, w: Int, h: Int, radius: Int, hm: Int, div: Int) {
+            for (x in 0 until w) {
+                var aSum = 0; var rSum = 0; var gSum = 0; var bSum = 0
+                for (i in -radius..radius) {
+                    val p = src[Math.min(hm, Math.max(0, i)) * w + x]
+                    aSum += (p ushr 24) and 0xFF
+                    rSum += (p ushr 16) and 0xFF
+                    gSum += (p ushr 8) and 0xFF
+                    bSum += p and 0xFF
+                }
+                for (y in 0 until h) {
+                    dst[y * w + x] = ((aSum / div) shl 24) or
+                            ((rSum / div) shl 16) or
+                            ((gSum / div) shl 8) or
+                            (bSum / div)
+                    val outY = Math.max(y - radius, 0)
+                    val inY = Math.min(y + radius + 1, hm)
+                    val pOut = src[outY * w + x]
+                    val pIn = src[inY * w + x]
+                    aSum += ((pIn ushr 24) and 0xFF) - ((pOut ushr 24) and 0xFF)
+                    rSum += ((pIn ushr 16) and 0xFF) - ((pOut ushr 16) and 0xFF)
+                    gSum += ((pIn ushr 8) and 0xFF) - ((pOut ushr 8) and 0xFF)
+                    bSum += (pIn and 0xFF) - (pOut and 0xFF)
+                }
+            }
+        }
+    }
+
+    /** Real-time optical backdrop blur engine for Android 11 and all versions. */
+    private object BlurEngine {
+        private var blurBitmap: Bitmap? = null
+        private var blurCanvas: Canvas? = null
+        private var lastCaptureTime = 0L
+        private val locNav = IntArray(2)
+        private val locPager = IntArray(2)
+
+        fun capture(nav: View, pagerView: View) {
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastCaptureTime < 28L) return // ~35 FPS throttle for smooth low-CPU execution
+            val nw = nav.width
+            val nh = nav.height
+            val pw = pagerView.width
+            val ph = pagerView.height
+            if (nw <= 0 || nh <= 0 || pw <= 0 || ph <= 0) return
+            if (!pagerView.isShown || !nav.isShown) return
+
+            nav.getLocationOnScreen(locNav)
+            pagerView.getLocationOnScreen(locPager)
+            val dx = locNav[0] - locPager[0]
+            val dy = locNav[1] - locPager[1]
+
+            val scale = 0.35f
+            val bw = Math.max((nw * scale).toInt(), 1)
+            val bh = Math.max((nh * scale).toInt(), 1)
+
+            if (blurBitmap == null || blurBitmap!!.isRecycled || blurBitmap!!.width != bw || blurBitmap!!.height != bh) {
+                blurBitmap?.recycle()
+                blurBitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+                blurCanvas = Canvas(blurBitmap!!)
+            }
+
+            val bmp = blurBitmap ?: return
+            val c = blurCanvas ?: return
+
+            lastCaptureTime = now
+            runCatching {
+                bmp.eraseColor(Color.TRANSPARENT)
+                c.save()
+                c.scale(scale, scale)
+                c.translate(-dx.toFloat(), -dy.toFloat())
+                pagerView.draw(c)
+                c.restore()
+
+                StackBlur.blur(bmp, 3)
+
+                (nav.background as? LiquidGlassDrawable)?.let { bg ->
+                    bg.backdropBitmap = bmp
+                    bg.invalidateSelf()
+                }
+            }
+        }
+    }
+
+    /** Custom LinearLayout to intercept and handle horizontal gestures for continuous page dragging. */
+    class NavLinearLayout(ctx: android.content.Context) : LinearLayout(ctx) {
+        var dragHandler: ((android.view.MotionEvent) -> Boolean)? = null
+        var interceptHandler: ((android.view.MotionEvent) -> Boolean)? = null
+
+        override fun onInterceptTouchEvent(ev: android.view.MotionEvent): Boolean {
+            if (interceptHandler?.invoke(ev) == true) return true
+            return super.onInterceptTouchEvent(ev)
+        }
+
+        override fun onTouchEvent(ev: android.view.MotionEvent): Boolean {
+            if (dragHandler?.invoke(ev) == true) return true
+            return super.onTouchEvent(ev)
+        }
     }
 
     private val BADGE_COLOR get() = M3.badge
@@ -354,7 +514,7 @@ object MainNav {
             // Hide the native indicator entirely; we render our own.
             indicator.visibility = View.GONE
 
-            val nav = LinearLayout(parent.context).apply {
+            val nav = NavLinearLayout(parent.context).apply {
                 tag = NAV_TAG
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
@@ -395,6 +555,104 @@ object MainNav {
             state.current = pager.current()
             active = state
 
+            val touchSlop = android.view.ViewConfiguration.get(parent.context).scaledTouchSlop
+            var downRawX = 0f
+            var downRawY = 0f
+            var lastRawX = 0f
+            var isDragging = false
+
+            nav.interceptHandler = { ev ->
+                when (ev.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        downRawX = ev.rawX
+                        downRawY = ev.rawY
+                        lastRawX = ev.rawX
+                        isDragging = false
+                        false
+                    }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        val dx = Math.abs(ev.rawX - downRawX)
+                        val dy = Math.abs(ev.rawY - downRawY)
+                        if (dx > touchSlop && dx > dy) {
+                            isDragging = true
+                            nav.parent?.requestDisallowInterceptTouchEvent(true)
+                            if (!pager.isFakeDragging()) {
+                                pager.beginFakeDrag()
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                        isDragging = false
+                        false
+                    }
+                    else -> false
+                }
+            }
+
+            nav.dragHandler = { ev ->
+                when (ev.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        downRawX = ev.rawX
+                        downRawY = ev.rawY
+                        lastRawX = ev.rawX
+                        true
+                    }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        val dx = ev.rawX - lastRawX
+                        lastRawX = ev.rawX
+                        val totalDx = Math.abs(ev.rawX - downRawX)
+                        val totalDy = Math.abs(ev.rawY - downRawY)
+                        if (!isDragging && totalDx > touchSlop && totalDx > totalDy) {
+                            isDragging = true
+                            nav.parent?.requestDisallowInterceptTouchEvent(true)
+                            if (!pager.isFakeDragging()) {
+                                pager.beginFakeDrag()
+                            }
+                        }
+                        if (isDragging) {
+                            val nw = nav.width.toFloat().coerceAtLeast(1f)
+                            val pw = pagerView.width.toFloat().takeIf { it > 0f } ?: nav.resources.displayMetrics.widthPixels.toFloat()
+                            val spanRatio = (pw * (pageCount - 1).coerceAtLeast(1)) / nw
+                            val dragDelta = -dx * spanRatio
+                            pager.fakeDragBy(dragDelta)
+
+                            val localX = ev.x.coerceIn(0f, nw)
+                            (nav.background as? LiquidGlassDrawable)?.let { bg ->
+                                bg.activeTabCenterX = localX
+                                bg.invalidateSelf()
+                            }
+
+                            val targetFraction = (localX / nw) * pageCount
+                            val targetIndex = targetFraction.toInt().coerceIn(0, pageCount - 1)
+                            if (targetIndex != state.current) {
+                                state.current = targetIndex
+                                render(state)
+                            }
+                            BlurEngine.capture(nav, pagerView)
+                        }
+                        true
+                    }
+                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                        if (isDragging) {
+                            isDragging = false
+                            pager.endFakeDrag()
+                            val nw = nav.width.toFloat().coerceAtLeast(1f)
+                            val localX = ev.x.coerceIn(0f, nw)
+                            val targetFraction = (localX / nw) * pageCount
+                            val targetIndex = targetFraction.toInt().coerceIn(0, pageCount - 1)
+                            pager.setCurrent(targetIndex)
+                            render(state, force = true)
+                            BlurEngine.capture(nav, pagerView)
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            }
+
             buildCells(state)
             parent.clipChildren = false
             parent.clipToPadding = false
@@ -415,6 +673,7 @@ object MainNav {
             pager.observe {
                 render(state)
                 ensurePagePadding(pagerView, barHeightPx() + 14.dp)
+                BlurEngine.capture(nav, pagerView)
             }
             positionBar(parent, pagerView, indicator, nav, barHeight)
             nav.viewTreeObserver.addOnWindowFocusChangeListener { hasFocus ->
@@ -1006,9 +1265,11 @@ object MainNav {
                         nav.visibility = View.VISIBLE
                         val gap = if (Settings.mainNavSquare.value || Settings.mainNavLabels.value) 4.dp else 12.dp
                         ensurePagePadding(pagerView, barHeight + gap + 10.dp)
+                        BlurEngine.capture(nav, pagerView)
                     }.onFailure {
                         nav.visibility = View.VISIBLE
                     }
+                    BlurEngine.capture(nav, pagerView)
                     return true
                 }
             }
@@ -1060,6 +1321,22 @@ object MainNav {
                 pager.javaClass.getMethod("setCurrentItem", Int::class.javaPrimitiveType).invoke(pager, i)
             }.onFailure { Utils.log("MainNav setCurrent($i) failed: $it") }
         }
+
+        fun beginFakeDrag(): Boolean = runCatching {
+            pager.javaClass.getMethod("beginFakeDrag").invoke(pager) as Boolean
+        }.getOrDefault(false)
+
+        fun fakeDragBy(offsetPx: Float): Boolean = runCatching {
+            pager.javaClass.getMethod("fakeDragBy", Float::class.javaPrimitiveType).invoke(pager, offsetPx) as? Boolean ?: true
+        }.getOrDefault(false)
+
+        fun endFakeDrag(): Boolean = runCatching {
+            pager.javaClass.getMethod("endFakeDrag").invoke(pager) as? Boolean ?: true
+        }.getOrDefault(false)
+
+        fun isFakeDragging(): Boolean = runCatching {
+            pager.javaClass.getMethod("isFakeDragging").invoke(pager) as Boolean
+        }.getOrDefault(false)
 
         // registerOnPageChangeCallback is also stripped, so we watch page changes via the framework
         // OnScrollChangedListener (fires on any descendant scroll, incl. page swipes) and re-read
