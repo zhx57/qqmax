@@ -70,6 +70,31 @@ object MainNav {
     private val IDLE_ICON get() = 0x88FFFFFF.toInt()
     private val DOT_COLOR get() = 0x80FFFFFF.toInt()
 
+    private var isNavHidden = false
+    private var normalTranslationY = 0f
+
+    fun hideNav(nav: View) {
+        if (isNavHidden || !Settings.mainNavAutoHide.value) return
+        val parent = nav.parent as? View ?: return
+        isNavHidden = true
+        val hiddenY = (parent.height - nav.top).toFloat() + 24.dp
+        nav.animate()
+            .translationY(hiddenY)
+            .setDuration(220)
+            .setInterpolator(PathInterpolator(0.2f, 0f, 0f, 1f))
+            .start()
+    }
+
+    fun showNav(nav: View) {
+        if (!isNavHidden) return
+        isNavHidden = false
+        nav.animate()
+            .translationY(normalTranslationY)
+            .setDuration(220)
+            .setInterpolator(PathInterpolator(0.2f, 0f, 0f, 1f))
+            .start()
+    }
+
     /**
      * Liquid-glass bar surface, ported from liuran001/WeChat-LiquidGlass (LiquidGlassPanel + LiquidGlassHostLayout).
      *
@@ -468,6 +493,7 @@ object MainNav {
             if (key != null && (key.startsWith("mainNav") || key == "bottomMainNav")) {
                 momoi.mod.qqpro.util.ThreadManager.runOnUiThread({
                     active?.let { state ->
+                        showNav(state.nav)
                         render(state, force = true)
                     }
                 })
@@ -555,6 +581,10 @@ object MainNav {
             state.current = pager.current()
             active = state
 
+            val internalPagerRv = (pagerView as? ViewGroup)?.let { vg ->
+                (0 until vg.childCount).map { vg.getChildAt(it) }.firstOrNull { it is RecyclerView } as? RecyclerView
+            }
+
             val touchSlop = android.view.ViewConfiguration.get(parent.context).scaledTouchSlop
             var downRawX = 0f
             var downRawY = 0f
@@ -568,6 +598,7 @@ object MainNav {
                         downRawY = ev.rawY
                         lastRawX = ev.rawX
                         isDragging = false
+                        showNav(nav)
                         false
                     }
                     android.view.MotionEvent.ACTION_MOVE -> {
@@ -576,9 +607,7 @@ object MainNav {
                         if (dx > touchSlop && dx > dy) {
                             isDragging = true
                             nav.parent?.requestDisallowInterceptTouchEvent(true)
-                            if (!pager.isFakeDragging()) {
-                                pager.beginFakeDrag()
-                            }
+                            showNav(nav)
                             true
                         } else {
                             false
@@ -598,6 +627,7 @@ object MainNav {
                         downRawX = ev.rawX
                         downRawY = ev.rawY
                         lastRawX = ev.rawX
+                        showNav(nav)
                         true
                     }
                     android.view.MotionEvent.ACTION_MOVE -> {
@@ -608,16 +638,20 @@ object MainNav {
                         if (!isDragging && totalDx > touchSlop && totalDx > totalDy) {
                             isDragging = true
                             nav.parent?.requestDisallowInterceptTouchEvent(true)
-                            if (!pager.isFakeDragging()) {
-                                pager.beginFakeDrag()
-                            }
+                            showNav(nav)
                         }
                         if (isDragging) {
                             val nw = nav.width.toFloat().coerceAtLeast(1f)
                             val pw = pagerView.width.toFloat().takeIf { it > 0f } ?: nav.resources.displayMetrics.widthPixels.toFloat()
                             val spanRatio = (pw * (pageCount - 1).coerceAtLeast(1)) / nw
-                            val dragDelta = -dx * spanRatio
-                            pager.fakeDragBy(dragDelta)
+                            val scrollDelta = (dx * spanRatio).toInt()
+
+                            if (internalPagerRv != null) {
+                                internalPagerRv.scrollBy(scrollDelta, 0)
+                            } else {
+                                if (!pager.isFakeDragging()) pager.beginFakeDrag()
+                                pager.fakeDragBy(-scrollDelta.toFloat())
+                            }
 
                             val localX = ev.x.coerceIn(0f, nw)
                             (nav.background as? LiquidGlassDrawable)?.let { bg ->
@@ -629,7 +663,15 @@ object MainNav {
                             val targetIndex = targetFraction.toInt().coerceIn(0, pageCount - 1)
                             if (targetIndex != state.current) {
                                 state.current = targetIndex
-                                render(state)
+                                state.cells.forEachIndexed { i, cell ->
+                                    val sel = i == targetIndex
+                                    cell.label?.setTextColor(if (sel) ACCENT else IDLE_ICON)
+                                    cell.pill.visibility = if (sel) View.VISIBLE else View.GONE
+                                    cell.pill.alpha = 1f
+                                    cell.icon.setColorFilter(if (sel) ACCENT else IDLE_ICON)
+                                    cell.icon.scaleX = if (sel) 1.1f else 1.0f
+                                    cell.icon.scaleY = if (sel) 1.1f else 1.0f
+                                }
                             }
                             BlurEngine.capture(nav, pagerView)
                         }
@@ -638,7 +680,9 @@ object MainNav {
                     android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                         if (isDragging) {
                             isDragging = false
-                            pager.endFakeDrag()
+                            if (internalPagerRv == null && pager.isFakeDragging()) {
+                                pager.endFakeDrag()
+                            }
                             val nw = nav.width.toFloat().coerceAtLeast(1f)
                             val localX = ev.x.coerceIn(0f, nw)
                             val targetFraction = (localX / nw) * pageCount
@@ -949,10 +993,14 @@ object MainNav {
         }
 
         if (parentH > 0) {
-            if (isBottom) {
-                nav.translationY = (parentH - parent.paddingBottom - barHeight - gap).toFloat() - nav.top.toFloat()
+            val normalY = if (isBottom) {
+                (parentH - parent.paddingBottom - barHeight - gap).toFloat() - nav.top.toFloat()
             } else {
-                nav.translationY = (parent.paddingTop + gap).toFloat() - nav.top.toFloat()
+                (parent.paddingTop + gap).toFloat() - nav.top.toFloat()
+            }
+            normalTranslationY = normalY
+            if (!isNavHidden) {
+                nav.translationY = normalY
             }
         }
 
@@ -1221,6 +1269,25 @@ object MainNav {
                     if (pageRv.clipToPadding) pageRv.clipToPadding = false
                     if (pageRv.paddingBottom < bottomPad) {
                         pageRv.setPadding(pageRv.paddingLeft, pageRv.paddingTop, pageRv.paddingRight, bottomPad)
+                    }
+                    if (pageRv.getTag(NAV_TAG.hashCode()) == null) {
+                        pageRv.setTag(NAV_TAG.hashCode(), true)
+                        pageRv.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+                            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                                val state = active ?: return
+                                if (!Settings.mainNavAutoHide.value) {
+                                    if (isNavHidden) showNav(state.nav)
+                                    return
+                                }
+                                if (Math.abs(dy) > 5) {
+                                    if (dy > 0) {
+                                        hideNav(state.nav)
+                                    } else {
+                                        showNav(state.nav)
+                                    }
+                                }
+                            }
+                        })
                     }
                 }
             }

@@ -222,6 +222,9 @@ object Settings {
     // page scrolls the next unread conversation to the top (cycling), contacts/qzone open their
     // notification screen. Requires 显示未读数 (mainNavUnread). Default on.
     val mainNavUnreadJump = BooleanPref("mainNavUnreadJump", true)
+    // Automatically hide/slide down the bottom navigation bar when scrolling lists down, and reveal
+    // when scrolling up or switching tabs. Default on.
+    val mainNavAutoHide = BooleanPref("mainNavAutoHide", true)
     // Use the in-app camera for 拍照. When off, launch the system camera app (third-party)
     // via an intent for photos. Video recording always uses the system app (the in-app
     // camera can't record video).

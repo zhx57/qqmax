@@ -522,6 +522,7 @@ class 设置页 : SettingsActivity() {
             switch("显示所有页面图标", "每个页面都显示图标，当前页蓝色高亮；关闭则只显示当前页图标、其余为圆点", Settings.mainNavAllIcons)
             switch("显示未读数", "在导航各页面图标上显示未读数红标(设置页除外)：消息页为总未读，联系人页为好友+群通知数", Settings.mainNavUnread)
             switch("点击当前页跳转未读", "已在某页时再次点击该页图标：消息页把下一条未读会话滚到顶部(循环)，联系人/动态页打开通知页面。需开启“显示未读数”", Settings.mainNavUnreadJump)
+            switch("滚动时自动收起", "列表向下滑动浏览时导航栏自动向下收起隐藏，反方向向上滑动时立即恢复出现", Settings.mainNavAutoHide)
         },
         SettingsCategory("导航与滚动", "翻页、返回与表冠") {
             switch("显示系统状态栏", "显示系统状态栏(时间/电量)，内容自动下移避让(适配安卓15+全面屏)；关闭则全屏隐藏状态栏。切换后需重启应用生效", Settings.showStatusBar)
