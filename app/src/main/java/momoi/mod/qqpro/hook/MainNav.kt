@@ -624,6 +624,24 @@ object MainNav {
             var lastRawX = 0f
             var isDragging = false
 
+            internalPagerRv?.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+                override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                    if (newState == RecyclerView.SCROLL_STATE_IDLE && !isDragging) {
+                        val pw = pagerView.width.takeIf { it > 0 } ?: return
+                        val currentOffset = recyclerView.computeHorizontalScrollOffset()
+                        val remainder = currentOffset % pw
+                        if (remainder != 0) {
+                            val targetPage = Math.round(currentOffset.toFloat() / pw).toInt().coerceIn(0, pageCount - 1)
+                            val delta = (targetPage * pw) - currentOffset
+                            if (delta != 0) {
+                                recyclerView.smoothScrollBy(delta, 0)
+                                pager.setCurrent(targetPage)
+                            }
+                        }
+                    }
+                }
+            })
+
             nav.interceptHandler = { ev ->
                 when (ev.actionMasked) {
                     android.view.MotionEvent.ACTION_DOWN -> {
@@ -725,6 +743,17 @@ object MainNav {
                             val localX = ev.x.coerceIn(0f, nw)
                             val progress = ((localX - tabW * 0.5f) / activeSpan).coerceIn(0f, 1f) * (pageCount - 1)
                             val targetIndex = Math.round(progress).toInt().coerceIn(0, pageCount - 1)
+
+                            if (internalPagerRv != null) {
+                                internalPagerRv.stopScroll()
+                                val pw = pagerView.width.takeIf { it > 0 } ?: nav.resources.displayMetrics.widthPixels
+                                val targetScrollX = targetIndex * pw
+                                val currentScrollX = internalPagerRv.computeHorizontalScrollOffset()
+                                val snapDistance = targetScrollX - currentScrollX
+                                if (snapDistance != 0) {
+                                    internalPagerRv.smoothScrollBy(snapDistance, 0)
+                                }
+                            }
                             pager.setCurrent(targetIndex)
                             (nav.background as? LiquidGlassDrawable)?.let { bg ->
                                 val targetCenterX = state.cells.getOrNull(targetIndex)?.frame?.let { it.left + it.width / 2f }
