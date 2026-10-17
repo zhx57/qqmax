@@ -367,6 +367,13 @@ object MainNav {
             if (dragHandler?.invoke(ev) == true) return true
             return super.onTouchEvent(ev)
         }
+
+        override fun onWindowVisibilityChanged(visibility: Int) {
+            super.onWindowVisibilityChanged(visibility)
+            if (visibility != View.VISIBLE) {
+                this.visibility = View.GONE
+            }
+        }
     }
 
     private val BADGE_COLOR get() = M3.badge
@@ -643,24 +650,31 @@ object MainNav {
                         if (isDragging) {
                             val nw = nav.width.toFloat().coerceAtLeast(1f)
                             val pw = pagerView.width.toFloat().takeIf { it > 0f } ?: nav.resources.displayMetrics.widthPixels.toFloat()
-                            val spanRatio = (pw * (pageCount - 1).coerceAtLeast(1)) / nw
-                            val scrollDelta = (dx * spanRatio).toInt()
+                            val tabW = nw / pageCount.toFloat().coerceAtLeast(1f)
+                            val activeSpan = (nw - tabW).coerceAtLeast(1f)
+                            val localX = ev.x.coerceIn(0f, nw)
+                            val progress = ((localX - tabW * 0.5f) / activeSpan).coerceIn(0f, 1f) * (pageCount - 1)
 
                             if (internalPagerRv != null) {
-                                internalPagerRv.scrollBy(scrollDelta, 0)
+                                val targetScrollX = Math.round(progress * pw)
+                                val currentScrollX = internalPagerRv.computeHorizontalScrollOffset()
+                                val delta = targetScrollX - currentScrollX
+                                if (delta != 0) {
+                                    internalPagerRv.scrollBy(delta, 0)
+                                }
                             } else {
+                                val spanRatio = (pw * (pageCount - 1).coerceAtLeast(1)) / nw
+                                val scrollDelta = (dx * spanRatio).toInt()
                                 if (!pager.isFakeDragging()) pager.beginFakeDrag()
                                 pager.fakeDragBy(-scrollDelta.toFloat())
                             }
 
-                            val localX = ev.x.coerceIn(0f, nw)
                             (nav.background as? LiquidGlassDrawable)?.let { bg ->
                                 bg.activeTabCenterX = localX
                                 bg.invalidateSelf()
                             }
 
-                            val targetFraction = (localX / nw) * pageCount
-                            val targetIndex = targetFraction.toInt().coerceIn(0, pageCount - 1)
+                            val targetIndex = Math.round(progress).toInt().coerceIn(0, pageCount - 1)
                             if (targetIndex != state.current) {
                                 state.current = targetIndex
                                 state.cells.forEachIndexed { i, cell ->
@@ -684,9 +698,11 @@ object MainNav {
                                 pager.endFakeDrag()
                             }
                             val nw = nav.width.toFloat().coerceAtLeast(1f)
+                            val tabW = nw / pageCount.toFloat().coerceAtLeast(1f)
+                            val activeSpan = (nw - tabW).coerceAtLeast(1f)
                             val localX = ev.x.coerceIn(0f, nw)
-                            val targetFraction = (localX / nw) * pageCount
-                            val targetIndex = targetFraction.toInt().coerceIn(0, pageCount - 1)
+                            val progress = ((localX - tabW * 0.5f) / activeSpan).coerceIn(0f, 1f) * (pageCount - 1)
+                            val targetIndex = Math.round(progress).toInt().coerceIn(0, pageCount - 1)
                             pager.setCurrent(targetIndex)
                             render(state, force = true)
                             BlurEngine.capture(nav, pagerView)
@@ -709,8 +725,8 @@ object MainNav {
             parent.addView(nav, ViewGroup.LayoutParams(targetWidth, barHeight))
             nav.bringToFront()
             if (Build.VERSION.SDK_INT >= 21) {
-                nav.elevation = 20.dp.toFloat()
-                nav.translationZ = 20.dp.toFloat()
+                nav.elevation = 0f
+                nav.translationZ = 0f
             }
             updateNavLayoutParams(state)
 
@@ -1314,8 +1330,17 @@ object MainNav {
                     val top = pagerView.top
                     val nw = nav.width.takeIf { it > 0 } ?: nav.measuredWidth
                     val navLeft = nav.left
+                    val isParentVisible = parent.isShown && parent.visibility == View.VISIBLE && pagerView.isShown
+                    if (!isParentVisible) {
+                        if (nav.visibility != View.GONE) nav.visibility = View.GONE
+                        return true
+                    }
                     if (h <= 0 || w <= 0) return true
-                    if (h == lastH && w == lastW && top == lastTop && nw == lastNavW && navLeft == lastNavLeft) return true
+                    if (h == lastH && w == lastW && top == lastTop && nw == lastNavW && navLeft == lastNavLeft) {
+                        if (!isNavHidden && nav.visibility != View.VISIBLE) nav.visibility = View.VISIBLE
+                        BlurEngine.capture(nav, pagerView)
+                        return true
+                    }
                     lastH = h; lastW = w; lastTop = top; lastNavW = nw; lastNavLeft = navLeft
                     runCatching {
                         // 1. Keep content pager full-bleed so content extends completely to the bottom edge
