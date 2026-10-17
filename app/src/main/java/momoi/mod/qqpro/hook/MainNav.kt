@@ -21,7 +21,9 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.RelativeLayout
 import android.widget.TextView
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.recyclerview.widget.RecyclerView
 import com.tencent.qqnt.chats.core.adapter.itemdata.RecentContactChatItem
 import com.tencent.qqnt.kernel.nativeinterface.DeleteRecentContactInfo
@@ -62,40 +64,36 @@ object MainNav {
     private const val NAV_TAG = "qqpro_main_nav"
     private const val QZONE_POLL_MS = 8000L   // re-read the QZone undeal count this often
     // Material 3 (dark) palette. The selected item sits on a tonal "active indicator" pill.
-    // Liquid glass crystal palette: selected icon pure white, inactive frosted white, glowing pill
+    // WeChat-LiquidGlass palette: crisp white active icon, frosted inactive, luminous droplet pill
     private val ACCENT get() = 0xFFFFFFFF.toInt()
-    private val PILL_COLOR get() = 0x50FFFFFF
-    private val IDLE_ICON get() = 0x99FFFFFF.toInt()
+    private val PILL_COLOR get() = 0x28FFFFFF
+    private val IDLE_ICON get() = 0x88FFFFFF.toInt()
     private val DOT_COLOR get() = 0x80FFFFFF.toInt()
 
     /**
-     * Liquid-glass bar surface, 1:1 fidelity ported from big-dictator/LiquidTab (config/GlassConfig defaults +
-     * GlassHostLayout.drawGlassPanel + NativeBackdropBlur).
+     * Liquid-glass bar surface, ported from liuran001/WeChat-LiquidGlass (LiquidGlassPanel + LiquidGlassHostLayout).
      *
      * Features:
-     *  - Ambient Drop Shadow: panel shadow ringing the capsule on all sides (clipOutPath prevents inner dimming).
-     *  - Backdrop with Saturation Boost: 1.45x color saturation filter on the captured/downscaled scene.
-     *  - Surface fill: LiquidTab surfaceContainerColor — dark #211F26 / light #FFFFFF at fixed 40% alpha.
-     *  - Interactive Highlight: LiquidTab RadialGradient bloom centered at the currently active tab.
-     *  - Dual-light bloom stroke: 1dp white edge lit by two lights (-45° primary 1.0, lower secondary 0.4).
-     *  - Capsule geometry: corner radius = height × 50% (cornerRadiusPercent = 50).
+     *  - WeChat-LiquidGlass surfaceContainer wash: 0x662C2C2E in dark mode (40% #2C2C2E) / 0x66F2F2F7 in light mode.
+     *  - Top curved specular gloss: linear gradient fading across top 45% of the capsule.
+     *  - Soft elevation drop shadow: 8dp blur ambient shadow underneath.
+     *  - Crisp highlight rim: 1dp stroke with 0x22FFFFFF.
+     *  - Capsule geometry: corner radius = height × 50%.
      */
-    private class LiquidGlassDrawable(private val dark: Boolean) : android.graphics.drawable.Drawable() {
-        private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val glassGlossPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val specularPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private class LiquidGlassDrawable(val dark: Boolean) : android.graphics.drawable.Drawable() {
+        private val surfacePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val glossPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 1.dp.toFloat()
         }
-        private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(80, 0, 0, 0)
-        }
         private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            setShadowLayer(8.dp.toFloat(), 0f, 2.dp.toFloat(), if (dark) 0x33000000 else 0x1A000000)
+        }
         private val path = Path()
-        private val shadowPath = Path()
         private val rect = RectF()
-        private val shadowRect = RectF()
 
         /** Center X coordinate of the active tab for rendering the interactive highlight bloom. */
         var activeTabCenterX: Float = -1f
@@ -103,46 +101,33 @@ object MainNav {
         override fun onBoundsChange(bounds: Rect) {
             super.onBoundsChange(bounds)
             if (bounds.isEmpty) return
+            val h = bounds.height().toFloat()
 
-            // Luminous crystal glass frosted sheen
-            glassGlossPaint.shader = android.graphics.LinearGradient(
-                bounds.left.toFloat(), bounds.top.toFloat(),
-                bounds.left.toFloat(), bounds.bottom.toFloat(),
-                intArrayOf(
-                    Color.argb(85, 255, 255, 255), // top icy specular sheen
-                    Color.argb(30, 255, 255, 255), // body
-                    Color.argb(15, 255, 255, 255),
-                    Color.argb(50, 255, 255, 255), // bottom rim reflection
-                ),
-                floatArrayOf(0f, 0.35f, 0.75f, 1f),
+            // 1. WeChat-LiquidGlass surface paint: 0x662C2C2E (40% #2C2C2E in dark mode)
+            surfacePaint.color = if (dark) 0x662C2C2E else 0x66F2F2F7
+
+            // 2. WeChat-LiquidGlass top gloss: specular white sheen across top 45% of the bar
+            glossPaint.shader = android.graphics.LinearGradient(
+                0f, bounds.top.toFloat(),
+                0f, bounds.top + h * 0.45f,
+                if (dark) 0x24FFFFFF else 0x40FFFFFF,
+                0x00FFFFFF,
                 Shader.TileMode.CLAMP
             )
 
-            // Deep acrylic glass substrate
-            bgPaint.color = if (dark) Color.argb(110, 26, 26, 34) else Color.argb(130, 240, 240, 248)
-
-            // Dual-light crisp edge outline
+            // 3. WeChat-LiquidGlass highlight rim: dual-source crisp light outline
             val steps = 90
             val strokeColors = IntArray(steps)
-            val baseAlpha = if (dark) 0.85f else 0.95f
+            val baseAlpha = if (dark) 0.45f else 0.65f
             for (i in 0 until steps) {
                 val theta = Math.toRadians((i * 360.0 / steps))
                 val l1 = Math.cos(theta + Math.toRadians(45.0)).toFloat()
                 val l2 = Math.cos(theta - Math.toRadians(90.0)).toFloat()
-                val brightness = (0.25f + 0.75f * (l1 * l1) + 0.45f * (l2 * l2)).coerceIn(0f, 1f)
+                val brightness = (0.25f + 0.75f * (l1 * l1) + 0.35f * (l2 * l2)).coerceIn(0f, 1f)
                 val alpha = (brightness * baseAlpha * 255).toInt().coerceIn(0, 255)
                 strokeColors[i] = Color.argb(alpha, 255, 255, 255)
             }
             strokePaint.shader = SweepGradient(bounds.exactCenterX(), bounds.exactCenterY(), strokeColors, null)
-
-            // Top curved specular bevel reflection
-            specularPaint.shader = android.graphics.LinearGradient(
-                bounds.left.toFloat(), bounds.top.toFloat(),
-                bounds.left.toFloat(), bounds.top + bounds.height() * 0.45f,
-                Color.argb(130, 255, 255, 255),
-                Color.TRANSPARENT,
-                Shader.TileMode.CLAMP
-            )
         }
 
         override fun draw(canvas: android.graphics.Canvas) {
@@ -151,35 +136,34 @@ object MainNav {
             rect.set(b)
             val r = rect.height().coerceAtMost(rect.width()) / 2f
 
-            // 1. Soft 3D drop shadow underneath
-            shadowRect.set(rect.left + 1.dp, rect.top + 3.dp, rect.right - 1.dp, rect.bottom + 5.dp)
-            shadowPath.reset()
-            val sr = shadowRect.height().coerceAtMost(shadowRect.width()) / 2f
-            shadowPath.addRoundRect(shadowRect, sr, sr, Path.Direction.CW)
-            canvas.drawPath(shadowPath, shadowPaint)
-
             path.reset()
             path.addRoundRect(rect, r, r, Path.Direction.CW)
+
+            // 1. WeChat-LiquidGlass drop shadow: punch the pill out of the shadow
+            // so the translucent glass interior stays crystal clear and never muddy.
+            if (Build.VERSION.SDK_INT >= 26) {
+                canvas.save()
+                canvas.clipOutPath(path)
+                canvas.drawPath(path, shadowPaint)
+                canvas.restore()
+            }
 
             canvas.save()
             canvas.clipPath(path)
 
-            // 2. Base acrylic glass body
-            canvas.drawRect(rect, bgPaint)
+            // 2. WeChat-LiquidGlass surface fill
+            canvas.drawRect(rect, surfacePaint)
 
-            // 3. Crystal frosted glass shine
-            canvas.drawRect(rect, glassGlossPaint)
+            // 3. WeChat-LiquidGlass specular gloss
+            canvas.drawRect(rect, glossPaint)
 
-            // 4. Upper bevel glass reflection
-            canvas.drawRect(rect, specularPaint)
-
-            // 5. Active tab interactive glow
+            // 4. Interactive highlight: soft radial bloom behind the selected tab
             if (activeTabCenterX >= 0f) {
                 haloPaint.shader = RadialGradient(
                     activeTabCenterX,
                     rect.centerY(),
-                    rect.height() * 1.3f,
-                    Color.argb(110, 75, 150, 255),
+                    rect.height() * 1.35f,
+                    Color.argb(55, 255, 255, 255),
                     Color.TRANSPARENT,
                     Shader.TileMode.CLAMP
                 )
@@ -187,7 +171,7 @@ object MainNav {
             }
             canvas.restore()
 
-            // 6. Dual-light crisp edge outline
+            // 5. Dual-light crisp edge outline
             val strokeRect = RectF(rect)
             strokeRect.inset(strokePaint.strokeWidth * 0.5f, strokePaint.strokeWidth * 0.5f)
             val strokePath = Path()
@@ -406,12 +390,7 @@ object MainNav {
                 nav.elevation = 20.dp.toFloat()
                 nav.translationZ = 20.dp.toFloat()
             }
-            (nav.layoutParams as? ViewGroup.MarginLayoutParams)?.let { mlp ->
-                if (isSpread) {
-                    mlp.leftMargin = 12.dp
-                    mlp.rightMargin = 12.dp
-                }
-            }
+            updateNavLayoutParams(state)
 
             pager.observe {
                 render(state)
@@ -535,19 +514,18 @@ object MainNav {
         val square = Settings.mainNavSquare.value
         val iconSize = Settings.mainNavHeight.value.toInt().coerceIn(8, 64).dp
         val dotSize = (iconSize / 3).coerceAtLeast(4.dp)
-        // M3 active-indicator pill. Kept modest so the bar stays compact on a round screen, and the
-        // cell is sized to the pill so toggling it never reflows the row (icons must not shift).
-        val pillW = (iconSize * 1.5f).toInt()
-        val pillH = iconSize + 4.dp
-        val cellW = pillW + 4.dp
+        // WeChat-LiquidGlass active-indicator droplet pill geometry
+        val pillW = (iconSize * 1.6f).toInt()
+        val pillH = iconSize + 6.dp
+        val cellW = pillW + 8.dp
         for (i in 0 until state.pageCount) {
             val frame = FrameLayout(ctx).apply { clipChildren = false; clipToPadding = false }
-            // Liquid glass crystal active pill
+            // WeChat-LiquidGlass crystal active pill (10% translucent white droplet + 1dp frost stroke)
             val pill = View(ctx).apply {
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE; cornerRadius = 9999f
-                    setColor(Color.argb(85, 255, 255, 255))
-                    setStroke(1.dp, Color.argb(190, 255, 255, 255))
+                    setColor(0x28FFFFFF)
+                    setStroke(1.dp, 0x4DFFFFFF)
                 }
                 visibility = View.GONE
             }
@@ -559,16 +537,13 @@ object MainNav {
                 background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(DOT_COLOR) }
             }
             val badge = makeBadge(ctx)
-            // Inner container sized to the icon and centered in the cell. The badge anchors to the
-            // inner's top-right so it hugs the icon even when the cell is stretched (square mode).
             val inner = FrameLayout(ctx).apply { clipChildren = false; clipToPadding = false }
-            val innerW = iconSize + 6.dp
-            inner.addView(pill, FrameLayout.LayoutParams(pillW, pillH, Gravity.CENTER))
+            inner.addView(pill, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
             inner.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
             inner.addView(dot, FrameLayout.LayoutParams(dotSize, dotSize, Gravity.CENTER))
             inner.addView(badge, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, 12.dp, Gravity.TOP or Gravity.END))
-            frame.addView(inner, FrameLayout.LayoutParams(innerW, barHeight, Gravity.CENTER))
+            frame.addView(inner, FrameLayout.LayoutParams(pillW, pillH, Gravity.CENTER))
 
             val pos = i
             frame.isClickable = true
@@ -606,8 +581,8 @@ object MainNav {
             val pill = View(ctx).apply {
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE; cornerRadius = 9999f
-                    setColor(Color.argb(85, 255, 255, 255))
-                    setStroke(1.dp, Color.argb(190, 255, 255, 255))
+                    setColor(0x28FFFFFF)
+                    setStroke(1.dp, 0x4DFFFFFF)
                 }
                 visibility = View.GONE
             }
@@ -662,42 +637,118 @@ object MainNav {
         val square = Settings.mainNavSquare.value
         val labels = Settings.mainNavLabels.value
         val isSpread = square || labels
-        val padH = if (square) 12.dp else 8.dp
+        val padH = if (square) 12.dp else 10.dp
         nav.setPadding(padH, 2.dp, padH, 2.dp)
-        val parent = nav.parent as? ViewGroup
-        val parentW = parent?.width?.takeIf { it > 0 } ?: state.pager.pager.width
-        val targetWidth = if (isSpread) {
-            if (parentW > 0) parentW - 24.dp else ViewGroup.LayoutParams.MATCH_PARENT
-        } else {
-            ViewGroup.LayoutParams.WRAP_CONTENT
+        val parent = nav.parent as? ViewGroup ?: return
+        val gap = if (isSpread) 4.dp else 12.dp
+        val isBottom = Settings.bottomMainNav.value
+
+        val dark = !Settings.lightMode.value
+        (nav.background as? LiquidGlassDrawable)?.let { bg ->
+            if (bg.dark != dark) {
+                nav.background = LiquidGlassDrawable(dark)
+            }
         }
-        nav.layoutParams?.let { lp ->
-            lp.width = targetWidth
-            lp.height = barHeight
-            (lp as? ViewGroup.MarginLayoutParams)?.let { mlp ->
-                if (isSpread) {
-                    mlp.leftMargin = 12.dp
-                    mlp.rightMargin = 12.dp
+
+        when (val lp = nav.layoutParams) {
+            is ConstraintLayout.LayoutParams -> {
+                lp.startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+                lp.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+                if (isBottom) {
+                    lp.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+                    lp.topToTop = -1
+                    lp.bottomMargin = gap
+                    lp.topMargin = 0
                 } else {
-                    mlp.leftMargin = 0
-                    mlp.rightMargin = 0
+                    lp.topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+                    lp.bottomToBottom = -1
+                    lp.topMargin = gap
+                    lp.bottomMargin = 0
                 }
-            }
-        }
-        if (parent != null && parent.height > 0) {
-            val gap = if (isSpread) 4.dp else 10.dp
-            if (Settings.bottomMainNav.value) {
-                nav.translationY = (parent.height - barHeight - gap).toFloat()
-            } else {
-                nav.translationY = gap.toFloat()
-            }
-            if (!isSpread) {
-                val nw = nav.measuredWidth.takeIf { it > 0 } ?: nav.width
-                if (nw > 0 && parent.width > nw) {
-                    nav.translationX = ((parent.width - nw) / 2f) - nav.left.toFloat()
+                if (isSpread) {
+                    lp.width = 0 // MATCH_CONSTRAINT
+                    lp.marginStart = 12.dp
+                    lp.marginEnd = 12.dp
+                } else {
+                    lp.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                    lp.marginStart = 0
+                    lp.marginEnd = 0
                 }
-            } else {
+                lp.height = barHeight
                 nav.translationX = 0f
+                nav.translationY = 0f
+            }
+            is FrameLayout.LayoutParams -> {
+                lp.gravity = (if (isBottom) Gravity.BOTTOM else Gravity.TOP) or Gravity.CENTER_HORIZONTAL
+                if (isBottom) {
+                    lp.bottomMargin = gap
+                    lp.topMargin = 0
+                } else {
+                    lp.topMargin = gap
+                    lp.bottomMargin = 0
+                }
+                if (isSpread) {
+                    lp.width = ViewGroup.LayoutParams.MATCH_PARENT
+                    lp.leftMargin = 12.dp
+                    lp.rightMargin = 12.dp
+                } else {
+                    lp.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                    lp.leftMargin = 0
+                    lp.rightMargin = 0
+                }
+                lp.height = barHeight
+                nav.translationX = 0f
+                nav.translationY = 0f
+            }
+            is RelativeLayout.LayoutParams -> {
+                lp.addRule(RelativeLayout.CENTER_HORIZONTAL, RelativeLayout.TRUE)
+                if (isBottom) {
+                    lp.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM, RelativeLayout.TRUE)
+                    lp.addRule(RelativeLayout.ALIGN_PARENT_TOP, 0)
+                    lp.bottomMargin = gap
+                    lp.topMargin = 0
+                } else {
+                    lp.addRule(RelativeLayout.ALIGN_PARENT_TOP, RelativeLayout.TRUE)
+                    lp.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM, 0)
+                    lp.topMargin = gap
+                    lp.bottomMargin = 0
+                }
+                if (isSpread) {
+                    lp.width = ViewGroup.LayoutParams.MATCH_PARENT
+                    lp.leftMargin = 12.dp
+                    lp.rightMargin = 12.dp
+                } else {
+                    lp.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                    lp.leftMargin = 0
+                    lp.rightMargin = 0
+                }
+                lp.height = barHeight
+                nav.translationX = 0f
+                nav.translationY = 0f
+            }
+            else -> {
+                val parentW = parent.width
+                val parentH = parent.height
+                val targetW = if (isSpread) {
+                    if (parentW > 0) parentW - 24.dp else ViewGroup.LayoutParams.MATCH_PARENT
+                } else {
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                }
+                lp?.width = targetW
+                lp?.height = barHeight
+                if (parentH > 0) {
+                    if (isBottom) {
+                        nav.translationY = (parentH - barHeight - gap).toFloat() - nav.top.toFloat()
+                    } else {
+                        nav.translationY = gap.toFloat() - nav.top.toFloat()
+                    }
+                }
+                val nw = nav.width.takeIf { it > 0 } ?: nav.measuredWidth
+                if (!isSpread && parentW > 0 && nw > 0) {
+                    nav.translationX = ((parentW - nw) / 2f) - nav.left.toFloat()
+                } else if (isSpread) {
+                    nav.translationX = 12.dp - nav.left.toFloat()
+                }
             }
         }
         nav.bringToFront()
@@ -788,13 +839,16 @@ object MainNav {
             }
         }
 
-        // Colors: icon tint crossfades idle↔accent (+ a small scale pop when newly selected); the dot
-        // (single-icon mode) is set instantly.
+        // Colors: icon tint crossfades idle↔accent (+ 1.1x focus scale matching WeChat-LiquidGlass)
         if (showIcon) {
             animateIconColor(cell, if (selected) ACCENT else IDLE_ICON, animate)
-            if (selected && animate) {
-                cell.icon.scaleX = 0.8f; cell.icon.scaleY = 0.8f
-                cell.icon.animate().scaleX(1f).scaleY(1f).setDuration(DUR_IN).setInterpolator(EMPHASIZED).start()
+            val targetScale = if (selected) 1.1f else 1.0f
+            if (animate) {
+                cell.icon.animate().scaleX(targetScale).scaleY(targetScale)
+                    .setDuration(DUR_IN).setInterpolator(EMPHASIZED).start()
+            } else {
+                cell.icon.scaleX = targetScale
+                cell.icon.scaleY = targetScale
             }
         } else {
             (cell.dot.background as? GradientDrawable)?.setColor(if (selected) ACCENT else DOT_COLOR)
@@ -971,15 +1025,17 @@ object MainNav {
         var lastH = -1
         var lastW = -1
         var lastTop = Int.MIN_VALUE
+        var lastNavW = -1
         nav.viewTreeObserver.addOnPreDrawListener(
             object : android.view.ViewTreeObserver.OnPreDrawListener {
                 override fun onPreDraw(): Boolean {
                     val h = parent.height
                     val w = parent.width
                     val top = pagerView.top
+                    val nw = nav.width.takeIf { it > 0 } ?: nav.measuredWidth
                     if (h <= 0 || w <= 0) return true
-                    if (h == lastH && w == lastW && top == lastTop) return true
-                    lastH = h; lastW = w; lastTop = top
+                    if (h == lastH && w == lastW && top == lastTop && nw == lastNavW) return true
+                    lastH = h; lastW = w; lastTop = top; lastNavW = nw
                     runCatching {
                         // 1. Keep content pager full-bleed so content extends completely to the bottom edge
                         if (pagerView.layoutParams.height != h) {
@@ -988,29 +1044,12 @@ object MainNav {
                         }
                         pagerView.translationY = -top.toFloat()
 
-                        // 2. Float the bar above the bottom with a clean gap
-                        val square = Settings.mainNavSquare.value
-                        val labels = Settings.mainNavLabels.value
-                        val isSpread = square || labels
-                        val gap = if (isSpread) 4.dp else 10.dp
-                        if (Settings.bottomMainNav.value) {
-                            nav.translationY = (h - barHeight - gap).toFloat()
-                        } else {
-                            nav.translationY = gap.toFloat()
-                        }
-
-                        // 3. Center horizontally for wrap_content capsule island
-                        if (!isSpread) {
-                            val nw = nav.measuredWidth.takeIf { it > 0 } ?: nav.width
-                            if (nw > 0 && w > nw) {
-                                nav.translationX = ((w - nw) / 2f) - nav.left.toFloat()
-                            }
-                        } else {
-                            nav.translationX = 0f
-                        }
+                        // 2. Reposition & center floating capsule via native constraints/layout params
+                        active?.let { updateNavLayoutParams(it) }
 
                         nav.bringToFront()
                         nav.visibility = View.VISIBLE
+                        val gap = if (Settings.mainNavSquare.value || Settings.mainNavLabels.value) 4.dp else 12.dp
                         ensurePagePadding(pagerView, barHeight + gap + 10.dp)
                     }.onFailure {
                         nav.visibility = View.VISIBLE
