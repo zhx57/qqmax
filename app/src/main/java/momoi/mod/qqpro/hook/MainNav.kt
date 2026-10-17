@@ -21,9 +21,7 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.RelativeLayout
 import android.widget.TextView
-import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.recyclerview.widget.RecyclerView
 import com.tencent.qqnt.chats.core.adapter.itemdata.RecentContactChatItem
 import com.tencent.qqnt.kernel.nativeinterface.DeleteRecentContactInfo
@@ -362,14 +360,36 @@ object MainNav {
                 gravity = Gravity.CENTER
                 clipChildren = false
                 clipToPadding = false
-                // Liquid-glass surface (LiquidTab recipe): 40% fill + dual-light bloom stroke.
                 background = LiquidGlassDrawable(!Settings.lightMode.value)
-                val padH = if (Settings.mainNavSquare.value) 10.dp else 8.dp
+                val padH = if (Settings.mainNavSquare.value) 12.dp else 10.dp
                 setPadding(padH, 2.dp, padH, 2.dp)
                 // Stay hidden until positionBar has placed us (bottom/top); otherwise the bar paints
                 // one frame at its default y=0 (top) before the deferred post moves it down — a visible
                 // flash at the top on every return to the home page in bottom mode.
                 visibility = View.INVISIBLE
+
+                addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+                    if (left != oldLeft || right != oldRight || top != oldTop || bottom != oldBottom) {
+                        val curW = right - left
+                        val p = parent as? View ?: return@addOnLayoutChangeListener
+                        val pW = p.width
+                        val pH = p.height
+                        if (pW <= 0 || pH <= 0) return@addOnLayoutChangeListener
+                        val isSpread = Settings.mainNavSquare.value || Settings.mainNavLabels.value
+                        val gap = if (isSpread) 4.dp else 12.dp
+                        val isBottom = Settings.bottomMainNav.value
+                        if (isBottom) {
+                            translationY = (pH - p.paddingBottom - (bottom - top) - gap).toFloat() - top.toFloat()
+                        } else {
+                            translationY = (p.paddingTop + gap).toFloat() - top.toFloat()
+                        }
+                        if (isSpread) {
+                            translationX = 12.dp.toFloat() - left.toFloat()
+                        } else if (curW > 0 && pW > curW) {
+                            translationX = ((pW - curW) / 2f) - left.toFloat()
+                        }
+                    }
+                }
             }
             val state = NavState(nav, pager, iconMap, labelMap, pageCount)
             state.current = pager.current()
@@ -650,107 +670,40 @@ object MainNav {
             }
         }
 
-        when (val lp = nav.layoutParams) {
-            is ConstraintLayout.LayoutParams -> {
-                lp.startToStart = ConstraintLayout.LayoutParams.PARENT_ID
-                lp.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
-                if (isBottom) {
-                    lp.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
-                    lp.topToTop = -1
-                    lp.bottomMargin = gap
-                    lp.topMargin = 0
-                } else {
-                    lp.topToTop = ConstraintLayout.LayoutParams.PARENT_ID
-                    lp.bottomToBottom = -1
-                    lp.topMargin = gap
-                    lp.bottomMargin = 0
-                }
-                if (isSpread) {
-                    lp.width = 0 // MATCH_CONSTRAINT
-                    lp.marginStart = 12.dp
-                    lp.marginEnd = 12.dp
-                } else {
-                    lp.width = ViewGroup.LayoutParams.WRAP_CONTENT
-                    lp.marginStart = 0
-                    lp.marginEnd = 0
-                }
-                lp.height = barHeight
-                nav.translationX = 0f
-                nav.translationY = 0f
-            }
-            is FrameLayout.LayoutParams -> {
-                lp.gravity = (if (isBottom) Gravity.BOTTOM else Gravity.TOP) or Gravity.CENTER_HORIZONTAL
-                if (isBottom) {
-                    lp.bottomMargin = gap
-                    lp.topMargin = 0
-                } else {
-                    lp.topMargin = gap
-                    lp.bottomMargin = 0
-                }
-                if (isSpread) {
-                    lp.width = ViewGroup.LayoutParams.MATCH_PARENT
-                    lp.leftMargin = 12.dp
-                    lp.rightMargin = 12.dp
-                } else {
-                    lp.width = ViewGroup.LayoutParams.WRAP_CONTENT
-                    lp.leftMargin = 0
-                    lp.rightMargin = 0
-                }
-                lp.height = barHeight
-                nav.translationX = 0f
-                nav.translationY = 0f
-            }
-            is RelativeLayout.LayoutParams -> {
-                lp.addRule(RelativeLayout.CENTER_HORIZONTAL, RelativeLayout.TRUE)
-                if (isBottom) {
-                    lp.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM, RelativeLayout.TRUE)
-                    lp.addRule(RelativeLayout.ALIGN_PARENT_TOP, 0)
-                    lp.bottomMargin = gap
-                    lp.topMargin = 0
-                } else {
-                    lp.addRule(RelativeLayout.ALIGN_PARENT_TOP, RelativeLayout.TRUE)
-                    lp.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM, 0)
-                    lp.topMargin = gap
-                    lp.bottomMargin = 0
-                }
-                if (isSpread) {
-                    lp.width = ViewGroup.LayoutParams.MATCH_PARENT
-                    lp.leftMargin = 12.dp
-                    lp.rightMargin = 12.dp
-                } else {
-                    lp.width = ViewGroup.LayoutParams.WRAP_CONTENT
-                    lp.leftMargin = 0
-                    lp.rightMargin = 0
-                }
-                lp.height = barHeight
-                nav.translationX = 0f
-                nav.translationY = 0f
-            }
-            else -> {
-                val parentW = parent.width
-                val parentH = parent.height
-                val targetW = if (isSpread) {
-                    if (parentW > 0) parentW - 24.dp else ViewGroup.LayoutParams.MATCH_PARENT
-                } else {
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                }
-                lp?.width = targetW
-                lp?.height = barHeight
-                if (parentH > 0) {
-                    if (isBottom) {
-                        nav.translationY = (parentH - barHeight - gap).toFloat() - nav.top.toFloat()
-                    } else {
-                        nav.translationY = gap.toFloat() - nav.top.toFloat()
-                    }
-                }
-                val nw = nav.width.takeIf { it > 0 } ?: nav.measuredWidth
-                if (!isSpread && parentW > 0 && nw > 0) {
-                    nav.translationX = ((parentW - nw) / 2f) - nav.left.toFloat()
-                } else if (isSpread) {
-                    nav.translationX = 12.dp - nav.left.toFloat()
-                }
+        val parentW = parent.width
+        val parentH = parent.height
+        val targetWidth = if (isSpread) {
+            if (parentW > 0) parentW - 24.dp else ViewGroup.LayoutParams.MATCH_PARENT
+        } else {
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        }
+
+        nav.layoutParams?.let { lp ->
+            lp.width = targetWidth
+            lp.height = barHeight
+            (lp as? ViewGroup.MarginLayoutParams)?.let { mlp ->
+                mlp.leftMargin = 0
+                mlp.rightMargin = 0
+                mlp.topMargin = 0
+                mlp.bottomMargin = 0
             }
         }
+
+        if (parentH > 0) {
+            if (isBottom) {
+                nav.translationY = (parentH - parent.paddingBottom - barHeight - gap).toFloat() - nav.top.toFloat()
+            } else {
+                nav.translationY = (parent.paddingTop + gap).toFloat() - nav.top.toFloat()
+            }
+        }
+
+        val nw = nav.width.takeIf { it > 0 } ?: nav.measuredWidth
+        if (isSpread) {
+            nav.translationX = 12.dp.toFloat() - nav.left.toFloat()
+        } else if (parentW > 0 && nw > 0) {
+            nav.translationX = ((parentW - nw) / 2f) - nav.left.toFloat()
+        }
+
         nav.bringToFront()
         nav.requestLayout()
     }
@@ -1026,6 +979,7 @@ object MainNav {
         var lastW = -1
         var lastTop = Int.MIN_VALUE
         var lastNavW = -1
+        var lastNavLeft = Int.MIN_VALUE
         nav.viewTreeObserver.addOnPreDrawListener(
             object : android.view.ViewTreeObserver.OnPreDrawListener {
                 override fun onPreDraw(): Boolean {
@@ -1033,9 +987,10 @@ object MainNav {
                     val w = parent.width
                     val top = pagerView.top
                     val nw = nav.width.takeIf { it > 0 } ?: nav.measuredWidth
+                    val navLeft = nav.left
                     if (h <= 0 || w <= 0) return true
-                    if (h == lastH && w == lastW && top == lastTop && nw == lastNavW) return true
-                    lastH = h; lastW = w; lastTop = top; lastNavW = nw
+                    if (h == lastH && w == lastW && top == lastTop && nw == lastNavW && navLeft == lastNavLeft) return true
+                    lastH = h; lastW = w; lastTop = top; lastNavW = nw; lastNavLeft = navLeft
                     runCatching {
                         // 1. Keep content pager full-bleed so content extends completely to the bottom edge
                         if (pagerView.layoutParams.height != h) {
