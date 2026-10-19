@@ -62,21 +62,26 @@ object ChatsSearchBar {
 
     /**
      * Wrap [root] (the ChatListFragment's own root, returned from its onCreateView) with the search
-     * overlay. Idempotent — a previous wrapper for the same host is torn down first, because the
-     * messages page is rebuilt on every return to it.
+     * overlay.
+     *
+     * Called from `ChatListFragment.Y()`, i.e. during `onCreateView`, BEFORE the fragment's view has
+     * been added to any parent — ViewPager2's FragmentStateAdapter only commits the fragment during
+     * `onViewAttachedToWindow`. Two consequences handled here:
+     *
+     *  • `root.layoutParams` is NULL at this point, and `View.setLayoutParams(null)` throws
+     *    (`LayoutParameters cannot be null`). So the wrapper must be built with a concrete
+     *    LayoutParams of its own — never inherited from the parentless root.
+     *  • The chat list isn't inflated/attached yet either, so it can't be found synchronously.
+     *    The bar is therefore installed structurally right away (it doesn't need the RecyclerView),
+     *    and the list is bound later from [onListReady], which retries on the view queue. That is
+     *    deliberately NOT a "re-wrap later" retry: re-wrapping after the root is already attached
+     *    would move the view out of the pager's container into a wrapper nobody adds, leaving the
+     *    page blank.
      */
     fun install(root: View): View {
         val ctx = root.context
         // Already wrapped this exact root (e.g. an extra layout pass): nothing to do.
         if (root.tag == TAG) return root
-
-        val rv = findChatList(root)
-        if (rv == null) {
-            Utils.log("ChatsSearchBar: chat_list RecyclerView not found, retrying")
-            // The list may not be inflated yet; retry a few times off the view queue.
-            retry(root, 0)
-            return root
-        }
         detach()
 
         val searchBar = buildBar(ctx)
@@ -84,39 +89,63 @@ object ChatsSearchBar {
 
         val wrap = FrameLayout(ctx).apply {
             tag = TAG
-            layoutParams = root.layoutParams
+            // MATCH/MATCH explicitly: the root has no parent yet, so nothing to inherit. The
+            // pager container assigns real LayoutParams when it attaches the wrapper.
+            layoutParams = FrameLayout.LayoutParams(MATCH, MATCH)
             addView(root, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(searchBar, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
             addView(hint, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.CENTER))
         }
         bar = searchBar
-        list = rv
         emptyHint = hint
 
-        // Reserve room for the overlay: keep the list's top padding in sync with the bar's real
-        // measured height (a one-shot post() reads 0 before the first layout pass).
-        rv.clipToPadding = false
-        searchBar.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
-            val h = bottom - top
-            if (h > 0 && rv.paddingTop != h) {
-                rv.setPadding(rv.paddingLeft, h, rv.paddingRight, rv.paddingBottom)
-            }
-        }
+        // Bind the list once it exists (and again whenever the page is rebuilt).
+        bindListWhenReady(wrap, 0)
 
-        applyFilterToAttachedRows()
-        attachScrollListener(rv)
-        Utils.log("ChatsSearchBar: installed over ${rv.javaClass.simpleName}")
+        Utils.log("ChatsSearchBar: wrapped host root (list binding deferred)")
         return wrap
     }
 
-    private fun retry(root: View, attempt: Int) {
-        if (attempt >= 12) {
-            Utils.log("ChatsSearchBar: gave up waiting for chat_list")
+    /**
+     * Wait for the conversation list to be inflated inside [wrap], then wire the bar to it.
+     *
+     * The list is a descendant of the fragment's root (which we already host), so this only has to
+     * wait for inflation — it never reparents anything.
+     */
+    private fun bindListWhenReady(wrap: View, attempt: Int) {
+        val rv = findChatList(wrap)
+        if (rv != null) {
+            onListReady(wrap, rv)
             return
         }
-        root.postDelayed({
-            runCatching { install(root) }.onFailure { Utils.log("ChatsSearchBar retry: $it") }
-        }, 60)
+        if (attempt >= 40) {
+            Utils.log("ChatsSearchBar: gave up waiting for chat_list after $attempt attempts")
+            return
+        }
+        wrap.postDelayed({
+            runCatching { bindListWhenReady(wrap, attempt + 1) }
+                .onFailure { Utils.log("ChatsSearchBar bind retry: $it") }
+        }, 50)
+    }
+
+    /** Wire the bar to a resolved list: top inset, filtering, scroll re-evaluation. */
+    private fun onListReady(wrap: View, rv: RecyclerView) {
+        if (list === rv) return
+        list = rv
+        // Reserve room for the overlay: keep the list's top padding in sync with the bar's real
+        // measured height (a one-shot post() reads 0 before the first layout pass).
+        rv.clipToPadding = false
+        bar?.let { b ->
+            b.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
+                val h = bottom - top
+                if (h > 0 && rv.paddingTop != h) {
+                    rv.setPadding(rv.paddingLeft, h, rv.paddingRight, rv.paddingBottom)
+                }
+            }
+        }
+        applyFilterToAttachedRows()
+        attachScrollListener(rv)
+        Utils.log("ChatsSearchBar: bound to ${rv.javaClass.simpleName}")
     }
 
     /** Tear down state from a previous host so a stale list/bar can't be filtered. */
@@ -129,21 +158,18 @@ object ChatsSearchBar {
         query = ""
     }
 
-    /** The conversation list under [root], by layout id (never "first RecyclerView found"). */
+    /**
+     * The conversation list under [root], by layout id ONLY.
+     *
+     * No "first RecyclerView found" fallback: the main frame's content pager IS a ViewPager2 (which
+     * extends RecyclerView), and it lives outside this fragment — falling back to whatever
+     * RecyclerView turns up would happily bind the search bar to the pager (or to a nested row
+     * list) and filter the wrong thing. If the id never resolves, the bar simply stays unfiltered.
+     */
     private fun findChatList(root: View): RecyclerView? {
         val id = root.resources.getIdentifier(RV_ID_NAME, "id", root.context.packageName)
-        if (id != 0) (root.findViewById<View>(id) as? RecyclerView)?.let { return it }
-        return root.findAllRecyclerViews().firstOrNull()
-    }
-
-    private fun View.findAllRecyclerViews(): List<RecyclerView> {
-        val out = ArrayList<RecyclerView>()
-        fun walk(v: View) {
-            if (v is RecyclerView) { out.add(v); return }
-            if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
-        }
-        walk(this)
-        return out
+        if (id == 0) return null
+        return root.findViewById<View>(id) as? RecyclerView
     }
 
     // ── bar construction ────────────────────────────────────────────────────────────────────────
