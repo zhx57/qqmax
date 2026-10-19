@@ -194,12 +194,13 @@ class SkipAction(
                 // the chip would stay stuck on this stop forever (never advancing to the terminal
                 // "first unread" jump). Popping on tap guarantees the stepper always progresses.
                 if (head()?.seq == h.seq) points.removeFirstOrNull()
-                Utils.log("SkipAction: jumped seq=${h.seq}, next=${head()?.label}")
+                // Use the FOUND message's own msgSeq, not the stop's: the event payload may carry a
+                // slightly different seq (see CurrentMsgList.findFlexible), in which case jumping by
+                // the payload's value would re-resolve to nothing and the jump silently failed.
+                val realSeq = runCatching { msg.d.msgSeq }.getOrDefault(h.seq)
+                Utils.log("SkipAction: jumped stopSeq=${h.seq} realSeq=$realSeq, next=${head()?.label}")
                 done()
-                // Re-resolve the position at scroll time (see smoothScrollToSeqAndFlash): paging in
-                // history prepends items and shifts indices, so an index captured here would land on
-                // a neighbouring message — the "jumps to the wrong message" bug.
-                rv.jumpToSeqAndFlash(h.seq)
+                rv.jumpToSeqAndFlash(realSeq)
             })
         } else {
             // Terminal "first unread" stop. Jump deterministically to the ORIGINAL first unread

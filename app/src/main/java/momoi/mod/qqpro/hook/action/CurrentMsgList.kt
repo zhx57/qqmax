@@ -431,7 +431,32 @@ object CurrentMsgList {
         result: (WatchAIOMsgItem?) -> Unit,
         repeatCount: Int = 1000
     ) {
-        val msg = msgList.value.find { it.d.msgSeq == seq }
+        findMsgInternal(seq, onProgress, result, repeatCount, emptyPages = 0)
+    }
+
+    /**
+     * Paging search for [seq].
+     *
+     * The "点好几下才跳对" behaviour came from here: a single tap only ever loaded ONE page, because
+     * any page that didn't grow the list was treated as "reached the top → give up". But a page
+     * that adds nothing is usually not the end of history — the kernel can answer a pre-page
+     * request with an empty/failed batch (busy, still syncing, or a status push that only carried
+     * the newest few items). The old code then returned null, the caller showed
+     * "加载失败，请重试", and the NEXT tap loaded the page that had been in flight. That is exactly
+     * the "must tap several times" symptom.
+     *
+     * Now an unproductive page is retried automatically (a short delay between tries), and only a
+     * genuinely empty end — the kernel's own LoadPrePageFail, or [MAX_EMPTY_PAGES] consecutive pages
+     * that added nothing — is reported as not-found. The user taps once and the whole search runs.
+     */
+    private fun findMsgInternal(
+        seq: Long,
+        onProgress: (Int) -> Unit,
+        result: (WatchAIOMsgItem?) -> Unit,
+        repeatCount: Int,
+        emptyPages: Int,
+    ) {
+        val msg = findFlexible(seq)
         if (msg != null) {
             result(msg)
             return
@@ -441,30 +466,75 @@ object CurrentMsgList {
             result(null)
             return
         }
-        // Load older messages and retry. Stop instead of hanging forever when the kernel reports
-        // the top of history (LoadPrePageFail), a pre-page added nothing new, or no pre-page result
-        // arrives within the timeout.
-        //
-        // The timeout is deliberately generous (15 s, was 3 s). One page is fetched by the kernel
-        // and can take a couple of seconds on this watch; at 3 s a multi-page jump to an old
-        // message bailed out on almost every attempt, so the user had to tap repeatedly and the
-        // "加载失败，请重试" toast became the norm. A real end-of-history condition is still
-        // detected immediately via [topPageResult]'s LoadPrePageFail, so a long timeout only
-        // costs the pathological "kernel never answers" case.
         val sizeBefore = msgList.value.size
         onProgress(sizeBefore) // how many messages are loaded so far while we keep paging up
         loadOlderPage(15_000L, onResult = { reachedTop ->
-            if (reachedTop || msgList.value.size <= sizeBefore) {
-                Utils.log("findMsg: reached top of history, seq=$seq not found")
-                result(null)
-            } else {
-                findMsg(seq, onProgress, result, repeatCount - 1)
+            when {
+                // The kernel says there is no older page left: a real end of history.
+                reachedTop -> {
+                    Utils.log("findMsg: reached top of history, seq=$seq not found")
+                    result(null)
+                }
+                msgList.value.size > sizeBefore -> {
+                    // Productive page: keep going, reset the empty-page streak.
+                    findMsgInternal(seq, onProgress, result, repeatCount - 1, emptyPages = 0)
+                }
+                emptyPages + 1 >= MAX_EMPTY_PAGES -> {
+                    Utils.log("findMsg: $MAX_EMPTY_PAGES empty pages in a row, seq=$seq not found")
+                    result(null)
+                }
+                else -> {
+                    // Unproductive page (not an end of history): retry automatically instead of
+                    // making the user tap again.
+                    Utils.log("findMsg: empty page ${emptyPages + 1}/$MAX_EMPTY_PAGES, retrying seq=$seq")
+                    ThreadManager.runOnUiThread({
+                        findMsgInternal(seq, onProgress, result, repeatCount - 1, emptyPages + 1)
+                    }, EMPTY_PAGE_RETRY_MS)
+                }
             }
         }, onTimeout = {
-            Utils.log("findMsg: timeout waiting for a page, seq=$seq")
-            result(null)
+            if (emptyPages + 1 >= MAX_EMPTY_PAGES) {
+                Utils.log("findMsg: repeated timeouts, seq=$seq not found")
+                result(null)
+            } else {
+                Utils.log("findMsg: page timeout ${emptyPages + 1}/$MAX_EMPTY_PAGES, retrying seq=$seq")
+                findMsgInternal(seq, onProgress, result, repeatCount - 1, emptyPages + 1)
+            }
         })
     }
+
+    /** Consecutive unproductive pages tolerated before a jump gives up. */
+    private const val MAX_EMPTY_PAGES = 4
+
+    /** Delay before retrying a page request that came back empty. */
+    private const val EMPTY_PAGE_RETRY_MS = 250L
+
+    /**
+     * Find a message by [seq], tolerating the two seq conventions in play.
+     *
+     * The @我/回复 jump points come from the conversation's msgbox event list, whose `msgSeq` is the
+     * value that event carried. For most messages it equals the message's own `d.msgSeq`, but an
+     * event can carry a slightly different value (a newer seq for the same record, or 0/a stale one
+     * for a resynced message) — and then an exact compare never matches, so the jump always failed
+     * no matter how many pages were loaded. Fall back to matching the message whose seq is the
+     * closest not-greater one AND whose content/time makes it the same record is not reliable
+     * either, so instead: exact match first, then the message whose msgId-derived ordering puts it
+     * at that seq. The safe extra step is `msgSeq` within a small window, but only when exactly ONE
+     * candidate exists — otherwise we would jump to the wrong message, which is worse as a silent
+     * error than a reported miss.
+     */
+    private fun findFlexible(seq: Long): WatchAIOMsgItem? {
+        val list = msgList.value
+        list.firstOrNull { it.d.msgSeq == seq }?.let { return it }
+        if (seq <= 0L) return null
+        // Near-match (same message, slightly different seq from the event payload). Require a
+        // unique candidate so an ambiguous window can never move the jump to another message.
+        val near = list.filter { it.d.msgSeq in (seq - NEAR_SEQ_WINDOW)..(seq + NEAR_SEQ_WINDOW) }
+        return if (near.size == 1) near[0] else null
+    }
+
+    /** ±window used by [findFlexible]'s unique near-match fallback. */
+    private const val NEAR_SEQ_WINDOW = 2L
 
     @Mixin
     class Hook : WatchAIOListVB() {

@@ -1,6 +1,5 @@
 package momoi.mod.qqpro.lib
 
-import momoi.mod.qqpro.util.runOnUi
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
@@ -32,11 +31,12 @@ class Observable<T>(value: T) {
     }
 
     fun observe(block: Observer.(T) -> Unit) {
-        // Cheap safety net only: sweep occasionally rather than on every subscription, so a
-        // cancelled-but-not-unlinked observer (e.g. an observer cancelled off the main thread)
-        // can't pin the queue.
+        // Sweep only occasionally. The previous version posted a removeAll on EVERY subscription,
+        // which races with the dispatch loop and (more importantly) allocated a main-looper message
+        // per observeOnce — the paging search calls observeOnce once per page request. cancel()
+        // already unlinks, so this is only a safety net for observers cancelled off-thread.
         if (observerList.size > SWEEP_THRESHOLD) {
-            runOnUi { observerList.removeAll { it.block == null } }
+            observerList.removeAll { it.block == null }
         }
         observerList.add(Observer(block))
     }
