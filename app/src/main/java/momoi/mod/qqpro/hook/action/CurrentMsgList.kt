@@ -112,8 +112,64 @@ object CurrentMsgList {
     // update can no longer be mistaken for the page we requested. See [loadOlderPage].
     val topPageResult = Observable(0)
 
+    /**
+     * The adapter position of [msg].
+     *
+     * Resolved by **msgSeq**, never by object identity. This is what made every jump
+     * (@我/回复/引用/搜索) land on the wrong message: `msgList.value.indexOf(msg)` compares by
+     * reference, but the kernel hands us a FRESH `WatchAIOMsgItem` on every state push and the
+     * mirror is rebuilt on each merge — so an item captured by a finder (which matches on
+     * `d.msgSeq`, correctly) is frequently not the same instance that ended up in the mirror. The
+     * index then came back -1 (→ "加载失败，无法定位") or, worse, resolved against a list whose
+     * ordering had shifted, landing on a neighbouring message.
+     *
+     * Order of resolution, most authoritative first:
+     *   1. the LIVE adapter list ([uiOp].m()) — exactly what the cells are bound from;
+     *   2. our accumulated mirror ([msgList]).
+     */
     fun getMsgIndex(msg: WatchAIOMsgItem): Int {
-        return msgList.value.indexOf(msg)
+        val seq = runCatching { msg.d.msgSeq }.getOrNull() ?: return -1
+        runCatching {
+            val live = uiOp?.m()
+            if (live != null) {
+                val i = indexOfSeq(live, seq)
+                if (i >= 0) return i
+            }
+        }.onFailure { Utils.log("getMsgIndex live lookup failed: $it") }
+        return indexOfSeq(msgList.value, seq)
+    }
+
+    /** First index in [list] whose item's msgSeq equals [seq], or -1. */
+    private fun indexOfSeq(list: List<*>, seq: Long): Int {
+        for (i in list.indices) {
+            val item = list[i] as? WatchAIOMsgItem ?: continue
+            if (runCatching { item.d.msgSeq }.getOrNull() == seq) return i
+        }
+        return -1
+    }
+
+    /**
+     * Public seq → adapter-position resolver, for jump helpers that re-resolve at scroll time
+     * (prepending history shifts indices, so positions must not be captured early).
+     */
+    fun indexOfSeqPublic(seq: Long): Int {
+        runCatching {
+            val live = uiOp?.m()
+            if (live != null) {
+                val i = indexOfSeq(live, seq)
+                if (i >= 0) return i
+            }
+        }
+        return indexOfSeq(msgList.value, seq)
+    }
+
+    /** The item currently at adapter position [index] (live list first), or null. */
+    fun msgAt(index: Int): WatchAIOMsgItem? {
+        runCatching {
+            val live = uiOp?.m()
+            if (live != null && index in live.indices) return live[index] as? WatchAIOMsgItem
+        }
+        return msgList.value.getOrNull(index) as? WatchAIOMsgItem
     }
 
     /**
@@ -132,14 +188,21 @@ object CurrentMsgList {
 
     fun prevMsg(msg: WatchAIOMsgItem): WatchAIOMsgItem? {
         prevOverride?.let { return it(msg) }
+        val seq = runCatching { msg.d.msgSeq }.getOrNull()
+        if (seq == null) {
+            val mi = msgList.value.indexOf(msg)
+            return if (mi > 0) msgList.value.getOrNull(mi - 1) else null
+        }
+        // By msgSeq, not identity — see [getMsgIndex]: the kernel re-creates items on every push,
+        // so `indexOf(msg)` misses and the merge-header decision silently degrades.
         runCatching {
             val live = uiOp?.m()
             if (live != null) {
-                val i = live.indexOf(msg)
+                val i = indexOfSeq(live, seq)
                 if (i >= 0) return if (i > 0) live[i - 1] as? WatchAIOMsgItem else null
             }
         }.onFailure { Utils.log("prevMsg live lookup failed: $it") }
-        val mi = msgList.value.indexOf(msg)
+        val mi = indexOfSeq(msgList.value, seq)
         return if (mi > 0) msgList.value.getOrNull(mi - 1) else null
     }
 
@@ -381,16 +444,26 @@ object CurrentMsgList {
         // Load older messages and retry. Stop instead of hanging forever when the kernel reports
         // the top of history (LoadPrePageFail), a pre-page added nothing new, or no pre-page result
         // arrives within the timeout.
+        //
+        // The timeout is deliberately generous (15 s, was 3 s). One page is fetched by the kernel
+        // and can take a couple of seconds on this watch; at 3 s a multi-page jump to an old
+        // message bailed out on almost every attempt, so the user had to tap repeatedly and the
+        // "加载失败，请重试" toast became the norm. A real end-of-history condition is still
+        // detected immediately via [topPageResult]'s LoadPrePageFail, so a long timeout only
+        // costs the pathological "kernel never answers" case.
         val sizeBefore = msgList.value.size
         onProgress(sizeBefore) // how many messages are loaded so far while we keep paging up
-        loadOlderPage(3000L, onResult = { reachedTop ->
+        loadOlderPage(15_000L, onResult = { reachedTop ->
             if (reachedTop || msgList.value.size <= sizeBefore) {
                 Utils.log("findMsg: reached top of history, seq=$seq not found")
                 result(null)
             } else {
                 findMsg(seq, onProgress, result, repeatCount - 1)
             }
-        }, onTimeout = { result(null) })
+        }, onTimeout = {
+            Utils.log("findMsg: timeout waiting for a page, seq=$seq")
+            result(null)
+        })
     }
 
     @Mixin

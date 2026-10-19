@@ -25,6 +25,7 @@ import momoi.mod.qqpro.hook.action.CurrentMsgList
 import momoi.mod.qqpro.hook.action.RecentContacts
 import momoi.mod.qqpro.hook.view.BubbleTextView
 import momoi.mod.qqpro.hook.view.smoothScrollToStartAndFlash
+import momoi.mod.qqpro.hook.view.smoothScrollToSeqAndFlash
 import momoi.mod.qqpro.lib.FrameScope
 import momoi.mod.qqpro.lib.background
 import momoi.mod.qqpro.lib.clickable
@@ -193,10 +194,12 @@ class SkipAction(
                 // the chip would stay stuck on this stop forever (never advancing to the terminal
                 // "first unread" jump). Popping on tap guarantees the stepper always progresses.
                 if (head()?.seq == h.seq) points.removeFirstOrNull()
-                val idx = CurrentMsgList.getMsgIndex(msg)
-                Utils.log("SkipAction: jumped seq=${h.seq} -> idx=$idx, next=${head()?.label}")
+                Utils.log("SkipAction: jumped seq=${h.seq}, next=${head()?.label}")
                 done()
-                rv.safeSmoothToStart(idx)
+                // Re-resolve the position at scroll time (see smoothScrollToSeqAndFlash): paging in
+                // history prepends items and shifts indices, so an index captured here would land on
+                // a neighbouring message — the "jumps to the wrong message" bug.
+                rv.jumpToSeqAndFlash(h.seq)
             })
         } else {
             // Terminal "first unread" stop. Jump deterministically to the ORIGINAL first unread
@@ -224,6 +227,15 @@ class SkipAction(
         val n = layoutManager?.itemCount ?: 0
         if (n <= 0 || pos < 0) return
         smoothScrollToStartAndFlash(if (pos >= n) n - 1 else pos)
+    }
+
+    /**
+     * Jump to the message whose msgSeq is [seq], re-resolving its adapter position immediately
+     * before (and after) scrolling. Positions captured before a page load are stale because
+     * prepending history shifts every index.
+     */
+    private fun RecyclerView.jumpToSeqAndFlash(seq: Long) {
+        smoothScrollToSeqAndFlash(seq) { s -> CurrentMsgList.indexOfSeqPublic(s) }
     }
 }
 @Mixin

@@ -268,7 +268,9 @@ object ChatsSearchBar {
             this.adapter = adapter
             setBackgroundColor(M3.surface)
             clipToPadding = false
-            setPadding(0, 4.dp, 0, 8.dp)
+            // Bottom padding clears the main page's navigation bar, which is an overlay owned by the
+            // main frame (not by this fragment): without it the last result sits under the nav.
+            setPadding(0, 4.dp, 0, 56.dp)
             // While results are on screen they must own the drag. The main frame hosts the pages
             // in a horizontal pager; without this, a vertical drag that reaches the top/bottom of
             // the (short) result list is handed to the pager and swipes to another page. Declining
@@ -405,6 +407,8 @@ object ChatsSearchBar {
         val peerUid: String,
         val peerUin: Long,
         val chatType: Int,
+        /** Last-message preview shown under the name (empty → hidden). */
+        val preview: String = "",
     ) {
         fun matches(q: String): Boolean = name.contains(q, ignoreCase = true)
 
@@ -426,9 +430,11 @@ object ChatsSearchBar {
                     .getOrDefault(0L)
                 val chatType = runCatching { info.javaClass.getField("chatType").getInt(info) }
                     .getOrDefault(0)
+                val digest = runCatching { info.javaClass.getField("msgSummary").get(info) as? String }
+                    .getOrNull()
                 val display = remark?.takeIf { it.isNotEmpty() } ?: peerName?.takeIf { it.isNotEmpty() }
                     ?: uid
-                ChatRow(display, uid, uin, chatType)
+                ChatRow(display, uid, uin, chatType, digest.orEmpty().trim())
             }.getOrNull()
         }
     }
@@ -440,7 +446,7 @@ object ChatsSearchBar {
     ) : RecyclerView.Adapter<ResultAdapter.Row>() {
         private val rows = ArrayList<ChatRow>()
 
-        class Row(val view: LinearLayout, val name: TextView) : RecyclerView.ViewHolder(view)
+        class Row(val view: View, val name: TextView, val preview: TextView) : RecyclerView.ViewHolder(view)
 
         fun submit(list: List<ChatRow>) {
             rows.clear()
@@ -450,26 +456,62 @@ object ChatsSearchBar {
 
         override fun getItemCount(): Int = rows.size
 
+        /**
+         * A result row, styled as an M3 list card: a rounded surfaceContainer card with a tonal
+         * leading "chat" glyph, the chat name on the first line and the last-message preview
+         * (dimmed, single line) below it. Cards are separated by vertical spacing rather than
+         * dividers, which reads better on a small round screen.
+         */
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Row {
             val ctx = parent.context
+            val glyph = android.widget.ImageView(ctx).apply {
+                setImageDrawable(MaterialSymbol(MaterialSymbols.chat_bubble, M3.primary))
+                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            }
             val name = TextView(ctx).apply {
                 setTextColor(M3.onSurface)
-                textSize = 13f
+                textSize = 13.5f
                 setSingleLine()
                 ellipsize = TextUtils.TruncateAt.END
-                setPadding(14.dp, 10.dp, 14.dp, 10.dp)
             }
-            val view = LinearLayout(ctx).apply {
+            val preview = TextView(ctx).apply {
+                setTextColor(M3.onSurfaceVariant)
+                textSize = 11f
+                setSingleLine()
+                ellipsize = TextUtils.TruncateAt.END
+                visibility = View.GONE
+            }
+            val text = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
-                background = M3.ripple(M3.rounded(M3.surfaceContainer, M3.radiusLg))
                 addView(name, LinearLayout.LayoutParams(MATCH, WRAP))
+                addView(preview, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = 2.dp })
             }
-            return Row(view, name)
+            val card = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(12.dp, 9.dp, 12.dp, 9.dp)
+                background = M3.ripple(M3.rounded(M3.surfaceContainer, M3.radiusLg))
+                addView(glyph, LinearLayout.LayoutParams(16.dp, 16.dp).apply { marginEnd = 10.dp })
+                addView(text, LinearLayout.LayoutParams(0, WRAP, 1f))
+            }
+            // Outer margin wrapper: RecyclerView has no per-item spacing, and the card must not
+            // stretch edge-to-edge (it would read as one solid block).
+            val wrap = FrameLayout(ctx).apply {
+                setPadding(10.dp, 3.dp, 10.dp, 3.dp)
+                addView(card, FrameLayout.LayoutParams(MATCH, WRAP))
+            }
+            return Row(wrap, name, preview)
         }
 
         override fun onBindViewHolder(holder: Row, position: Int) {
             val row = rows[position]
             holder.name.text = row.name
+            if (row.preview.isNotEmpty()) {
+                holder.preview.text = row.preview
+                holder.preview.visibility = View.VISIBLE
+            } else {
+                holder.preview.visibility = View.GONE
+            }
             holder.view.setOnClickListener { onClick(row) }
         }
     }

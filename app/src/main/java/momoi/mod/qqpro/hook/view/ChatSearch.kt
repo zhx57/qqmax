@@ -483,17 +483,19 @@ class ChatSearchFragment : MyDialogFragment() {
         // Capture the decor view before dismiss() detaches us (activity becomes null afterwards).
         val decor = activity?.window?.decorView
         val rv = runCatching { CurrentMsgList.vb.H }.getOrNull()
-        val index = CurrentMsgList.getMsgIndex(item)
+        // Resolve by msgSeq at scroll time, not now: the position is only valid for the adapter
+        // state it was read from, and switching pages can push another update in between.
+        val seq = runCatching { item.d.msgSeq }.getOrNull() ?: -1L
         dismiss()
         runCatching {
             // The search entry lives on the rightmost settings page; bring the chat page (page 0)
             // back to the front, same as a photo/video send does (see WatchAIOPageReset / InputMethodFragmentHook).
             if (decor != null) switchToChatPage(decor)
             BubbleTextView.beginJumpUp()
-            // Distance-capped animated jump: teleports over the long unseen stretch then animates the
-            // final short hop, so far results land fast but still show a brief glide (not a crawl).
-            Utils.log("ChatSearch.jumpTo: rv=${System.identityHashCode(rv)} index=$index mirrorSize=${CurrentMsgList.msgList.value.size}")
-            if (rv != null && index >= 0) rv.post { rv.smoothScrollToStart(index) }
+            Utils.log("ChatSearch.jumpTo: rv=${System.identityHashCode(rv)} seq=$seq mirrorSize=${CurrentMsgList.msgList.value.size}")
+            if (rv != null && seq > 0L) {
+                rv.post { rv.smoothScrollToSeqAndFlash(seq) { s -> CurrentMsgList.indexOfSeqPublic(s) } }
+            }
         }.onFailure { Utils.log("ChatSearch: jump failed: $it") }
     }
 

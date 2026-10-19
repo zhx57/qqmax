@@ -503,19 +503,89 @@ object MainNav {
      * unconditional 8-second QZone poll, so a device sitting on the home page re-summed every
      * conversation it has ever seen, forever. The inputs only change when the kernel pushes, so the
      * result is memoised and invalidated by [put] / the unread-count listener.
+     *
+     * The union is what made the badge disagree with reality: [unread] holds the LIVE counts the
+     * kernel pushes (read → 0), but any conversation NOT in it fell back to
+     * `RecentContacts.map[..].unreadCntCached` — a snapshot taken at the last list bind, which still
+     * carries the PRE-read count. Reading a chat on another device (or before the list rebinds)
+     * therefore kept its old unread in the total: the badge showed more new messages than there
+     * were, and a chat could stay "unread" in the sum after being opened. [unread] is now treated as
+     * authoritative for any peer it knows about, and peers it has never seen are counted from the
+     * snapshot exactly once.
      */
     @Volatile private var unreadDirty = true
     private var unreadTotalCache = 0
 
+    /**
+     * Rebuild [unread] from the conversation adapter itself.
+     *
+     * The kernel's pushes ([put] / [onMsgUnreadCountUpdate]) are incremental and never say
+     * "this chat is gone" or "this chat is now read" for every peer, so the map accumulated stale
+     * counts: chats deleted long ago kept contributing to the badge, and a chat read on another
+     * device could stay counted until its next push. The adapter rows, by contrast, always carry
+     * the kernel's CURRENT unreadCnt for every conversation that still exists.
+     *
+     * This is the correction pass: whatever the adapter currently holds becomes the live table, and
+     * anything it no longer holds is dropped. It runs when the messages page is (re)rendered, which
+     * is exactly when the badge can be stale and a little work is affordable.
+     */
+    private fun reconcileUnreadFromList() {
+        val state = active ?: return
+        val pagerView = state.pager.pager as? ViewGroup ?: return
+        val ctx = pagerView.context
+        val rvId = ctx.resources.getIdentifier("chat_list", "id", ctx.packageName)
+        if (rvId == 0) return
+        val rv = pagerView.findAll { it is RecyclerView && it.id == rvId } as? RecyclerView ?: return
+        val adapter = rv.adapter ?: return
+        val getItem = runCatching {
+            adapter.javaClass.getMethod("getItem", Int::class.javaPrimitiveType)
+        }.getOrNull() ?: return
+        val fresh = HashMap<String, Int>(adapter.itemCount.coerceAtLeast(16))
+        for (i in 0 until adapter.itemCount) {
+            val item = runCatching { getItem.invoke(adapter, i) }.getOrNull() ?: continue
+            val info = runCatching { item.javaClass.getField("a").get(item) }.getOrNull() ?: continue
+            val uid = runCatching { info.javaClass.getField("peerUid").get(info) as? String }
+                .getOrNull() ?: continue
+            if (uid.isEmpty()) continue
+            val cnt = runCatching { info.javaClass.getField("unreadCnt").getLong(info) }
+                .getOrDefault(0L).toInt()
+            fresh[uid] = cnt
+            RecentContacts.recordMuted(
+                uid,
+                RecentContacts.isMuted(
+                    runCatching { info.javaClass.getField("isMsgDisturb").getBoolean(info) }.getOrDefault(false),
+                    runCatching { info.javaClass.getField("shieldFlag").getLong(info) }.getOrDefault(0L),
+                )
+            )
+        }
+        if (fresh.isEmpty()) return
+        // Replace wholesale: entries the adapter no longer has are conversations that were deleted
+        // (or never existed), and keeping them is what made the badge over-count.
+        unread.clear()
+        unread.putAll(fresh)
+        unreadDirty = true
+    }
+
     private fun messagesUnread(): Int {
         if (!unreadDirty) return unreadTotalCache
-        RecentContacts.map.forEach { (k, v) -> if (!unread.containsKey(k)) unread[k] = v.unreadCntCached }
-        val total = unread.entries
+        val total = HashMap<String, Int>(unread)
+        // Only add peers the kernel has never pushed a count for; never let a stale snapshot
+        // overwrite a live value.
+        RecentContacts.map.forEach { (k, v) ->
+            if (!total.containsKey(k)) total[k] = v.unreadCntCached
+        }
+        unreadTotalCache = total.entries
             .filter { it.value > 0 && !RecentContacts.isDisturb(it.key) }
             .sumOf { it.value }
-        unreadTotalCache = total
         unreadDirty = false
-        return total
+        return unreadTotalCache
+    }
+
+    /** Correct the live table from the list, then re-derive the cached total. */
+    private fun refreshUnreadForReal() {
+        reconcileUnreadFromList()
+        unreadDirty = true
+        unreadTotalCache = messagesUnread()
     }
 
     private fun unreadFor(state: NavState, page: Int): Int = when {
@@ -1156,6 +1226,10 @@ object MainNav {
         // Labeled (phone) mode is a standard bottom nav: always show every page's icon+label.
         val allIcons = Settings.mainNavAllIcons.value || Settings.mainNavLabels.value
         val showUnread = Settings.mainNavUnread.value
+        // Before deriving badges, correct the live unread table from the conversation list (see
+        // reconcileUnreadFromList — the pushed table alone drifts: it keeps deleted chats and can
+        // miss reads). Only when the badge is actually shown, so the walk costs nothing otherwise.
+        if (showUnread) refreshUnreadForReal()
         state.current = runCatching { state.pager.current() }.getOrDefault(state.current)
         val counts = if (showUnread) (0 until state.pageCount).map { unreadFor(state, it) } else emptyList()
         val key = "${state.current}|$allIcons|$showUnread|$counts"

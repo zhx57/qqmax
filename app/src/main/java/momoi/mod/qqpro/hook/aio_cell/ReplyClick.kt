@@ -14,7 +14,7 @@ import momoi.mod.qqpro.Settings
 import momoi.mod.qqpro.drawable.roundCornerDrawable
 import momoi.mod.qqpro.hook.action.CurrentMsgList
 import momoi.mod.qqpro.hook.view.BubbleTextView
-import momoi.mod.qqpro.hook.view.smoothScrollToStartAndFlash
+import momoi.mod.qqpro.hook.view.smoothScrollToSeqAndFlash
 import momoi.mod.qqpro.lib.dp
 import momoi.mod.qqpro.lib.material.M3
 import momoi.mod.qqpro.lib.material.M3CircularProgress
@@ -48,7 +48,10 @@ class ReplyClick(
                 finding = false
                 hideLoading()
                 if (item != null) {
-                    rv.smoothScrollToStartAndFlash(CurrentMsgList.getMsgIndex(item))
+                    // Jump by msgSeq and re-resolve the position at scroll time: fetching the source
+                    // page PREPENDS history, which shifts every adapter index, so a position taken
+                    // here would land on a neighbouring message.
+                    rv.smoothScrollToSeqAndFlash(item.d.msgSeq) { seq -> CurrentMsgList.indexOfSeqPublic(seq) }
                 } else {
                     Utils.toast(rv.context, "无法定位消息")
                 }

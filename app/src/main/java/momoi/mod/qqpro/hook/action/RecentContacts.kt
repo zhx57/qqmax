@@ -128,6 +128,26 @@ object RecentContacts {
     val map = mutableMapOf<String, Data>()
     fun get(peerUin: String?) = map[peerUin]
 
+    /**
+     * Peers currently present in the conversation list.
+     *
+     * [map] only ever GROWS: a row binds once and stays in the map forever, including after the chat
+     * is deleted or after the list is rebuilt without it. That is harmless for lookups by key, but
+     * it is not for anything that SUMS over the map — the nav unread badge used to add up every
+     * conversation it had ever seen. Callers that aggregate should intersect with this set.
+     */
+    private val livePeers = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    /** Record that [peerUid] is present in the current conversation list. */
+    fun markLive(peerUid: String?) {
+        if (!peerUid.isNullOrEmpty()) livePeers[peerUid] = true
+    }
+
+    /** Replace the live set (called when a full list bind starts). */
+    fun beginLivePass() = livePeers.clear()
+
+    fun isLive(peerUid: String): Boolean = livePeers.containsKey(peerUid)
+
     // 免打扰/屏蔽 (muted) state per peerUid, kept independently of [map] so the live unread badges
     // (MainNav / RichTitlebar) can exclude DND chats even before their list row has rendered — the
     // kernel listeners push unread counts and RecentContactInfo before the WatchRecentItemBuilder
@@ -182,6 +202,7 @@ object RecentContacts {
                 muted
             )
             recordMuted(item.a.peerUid, muted)
+            markLive(item.a.peerUid)
             // Replace unrendered emoji garbage in the preview with a "[表情]" placeholder before binding.
             sanitizeItem(item)
             super.t(item, holder)

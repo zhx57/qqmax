@@ -77,6 +77,70 @@ fun RecyclerView.smoothScrollToStartAndFlash(position: Int) {
     waitForSettleThenFlash(target, FLASH_MAX_TRIES)
 }
 
+/**
+ * Jump to the message with [msgSeq] and flash it once it settles.
+ *
+ * Preferred over the position-based variants for every "find a specific message" jump: the adapter
+ * position is resolved HERE, right before scrolling, and re-resolved on every retry. Positions go
+ * stale during a jump — paging older history PREPENDS items, which shifts every index — so a
+ * position computed before the load lands on the wrong message (the "jumps to the wrong message"
+ * bug). A msgSeq identifies the message regardless of how much history arrived meanwhile.
+ *
+ * [resolveSeq] is the current resolver (main-thread), injected so this helper stays independent of
+ * the message-list singleton.
+ */
+fun RecyclerView.smoothScrollToSeqAndFlash(msgSeq: Long, resolveSeq: (Long) -> Int) {
+    jumpToSeq(msgSeq, resolveSeq, FLASH_MAX_TRIES, flash = true)
+}
+
+private fun RecyclerView.jumpToSeq(
+    msgSeq: Long,
+    resolveSeq: (Long) -> Int,
+    tries: Int,
+    flash: Boolean,
+) {
+    val n = adapter?.itemCount ?: 0
+    if (n <= 0 || tries <= 0) return
+    val pos = resolveSeq(msgSeq)
+    if (pos < 0) {
+        // The list can still be settling (a page landed between the find and this call); retry on
+        // the next frames before giving up.
+        postOnAnimation { jumpToSeq(msgSeq, resolveSeq, tries - 1, flash) }
+        return
+    }
+    val target = pos.coerceIn(0, n - 1)
+    if (flash) {
+        smoothScrollToStart(target)
+        waitForSeqThenFlash(msgSeq, resolveSeq, FLASH_MAX_TRIES)
+    } else {
+        smoothScrollToStart(target)
+    }
+}
+
+/** Poll until settled, then flash the CURRENT position of [msgSeq] (re-resolved, never cached). */
+private fun RecyclerView.waitForSeqThenFlash(
+    msgSeq: Long,
+    resolveSeq: (Long) -> Int,
+    tries: Int,
+) {
+    if (tries <= 0) return
+    if (scrollState != RecyclerView.SCROLL_STATE_IDLE) {
+        postOnAnimation { waitForSeqThenFlash(msgSeq, resolveSeq, tries - 1) }
+        return
+    }
+    val pos = resolveSeq(msgSeq)
+    if (pos < 0) {
+        postOnAnimation { waitForSeqThenFlash(msgSeq, resolveSeq, tries - 1) }
+        return
+    }
+    val vh = findViewHolderForAdapterPosition(pos)
+    if (vh == null) {
+        postOnAnimation { waitForSeqThenFlash(msgSeq, resolveSeq, tries - 1) }
+        return
+    }
+    flashRow(vh.itemView)
+}
+
 private fun RecyclerView.waitForSettleThenFlash(target: Int, tries: Int) {
     if (tries <= 0) return
     val settled = scrollState == RecyclerView.SCROLL_STATE_IDLE
