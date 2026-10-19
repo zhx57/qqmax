@@ -6,12 +6,12 @@ import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.widget.doAfterTextChanged
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import momoi.mod.qqpro.lib.dp
 import momoi.mod.qqpro.lib.material.M3
@@ -20,102 +20,123 @@ import momoi.mod.qqpro.lib.material.MaterialSymbols
 import momoi.mod.qqpro.util.Utils
 
 /**
- * Always-visible search box pinned to the top of the messages page (1st main page).
+ * Always-visible search box for the messages page (1st main page).
  *
- * ## Why filtering is done at the LAYOUT level, not by re-submitting the list
+ * ## Design: a separate result list, never a modified conversation list
  *
- * The conversation list is fed by the kernel: `ChatsListAdapter` is driven by recent-contact
- * pushes (new message, read receipt, top/pin change, delete). Every other search surface in this
- * app filters by calling `submitList(filtered)` and then re-snapshots the adapter — that works for
- * selector lists whose content the app itself owns, but it is wrong here:
+ * The first attempt filtered by collapsing the native list's rows in place (height→0 + GONE).
+ * That approach is fundamentally wrong on this RecyclerView, and produced exactly the three
+ * failures it was bound to produce:
  *
- *   • a kernel push arriving mid-search would re-submit the UNFILTERED list, and the next
- *     keystroke would restore the filtered one — a race that flickers rows in and out;
- *   • `ListAdapter.submitList` on this adapter triggers the diff/animations used by the native
- *     list, so filtering through it re-runs the native bind path and its animations;
- *   • the pinned (置顶) rows and the unread badges are computed inside the native bind — feeding it
- *     a synthetic subset changes what it thinks the list looks like.
+ *   • **nothing ever matched** — the adapter's rows are only re-judged for views that are
+ *     currently attached; collapsing them also broke the list's own layout pass, so the
+ *     positions the filter read back were stale and nothing was ever reported as a match;
+ *   • **swiping scrolled into other pages** — collapsing every row emptied the conversation
+ *     list, and the surrounding horizontal pager then had nothing to scroll against, so a drag
+ *     crossed page boundaries;
+ *   • **the page looked broken afterwards** — row heights, margins and the list's top padding
+ *     were all mutated, and the native bind never restores them, so the original list came back
+ *     with rows mis-sized and its cards visually merged.
  *
- * So instead the adapter is left completely untouched: every bound row that doesn't match the
- * query gets `GONE`, matching rows stay visible. Rows are re-evaluated on every scroll/attach, so
- * rows recycled into view are judged correctly, and clearing the query restores everything
- * instantly — with no interaction with kernel pushes at all.
+ * So the native list is now treated as READ-ONLY, and the search is a completely separate
+ * surface: a result list (this file's own RecyclerView + adapter) overlaid on the list area while
+ * a query is active, and removed when the query is cleared. Nothing about the conversation list is
+ * ever written — no padding, no row heights, no visibility, no adapter submit. Dismissing the
+ * search is therefore guaranteed to restore the page exactly, and a drag inside the results
+ * scrolls the results instead of reaching the pager.
  *
- * The bar itself is an OVERLAY over the list (same construction as [momoi.mod.qqpro.hook.contact.ContactTopBar]).
- * The list is never reparented; it just gets a top padding equal to the bar's height so its first
- * row starts below the bar.
+ * Rows are read from the conversation adapter (`getItem(position)` → `RecentContactChatItem`,
+ * see [momoi.mod.qqpro.hook.MainNav.cycleChatUnread] which reads the same list the same way), and
+ * tapping a result opens that chat via the same intent the incoming-message notification uses
+ * ([momoi.mod.qqpro.hook.NotificationReply]).
  */
 object ChatsSearchBar {
     private const val TAG = "qqpro_chats_search"
-
-    /** Tag index stashing a collapsed row's original height (see [collapse]). */
-    private val COLLAPSE_TAG = "qqpro_chats_search_h".hashCode()
-
-    /** The chat list's layout id — same id the native list and [momoi.mod.qqpro.hook.MainNav] use. */
     private const val RV_ID_NAME = "chat_list"
 
-    private var bar: LinearLayout? = null
     private var field: EditText? = null
-    private var list: RecyclerView? = null
+    private var resultsAdapter: ResultAdapter? = null
     private var emptyHint: TextView? = null
+    private var list: RecyclerView? = null
     private var query = ""
 
+    // ── install ────────────────────────────────────────────────────────────────────────────────
+
     /**
-     * Wrap [root] (the ChatListFragment's own root, returned from its onCreateView) with the search
-     * overlay.
+     * Build the search overlay over the fragment's [root] and return the wrapper to use as the
+     * fragment view.
      *
-     * Called from `ChatListFragment.Y()`, i.e. during `onCreateView`, BEFORE the fragment's view has
-     * been added to any parent — ViewPager2's FragmentStateAdapter only commits the fragment during
-     * `onViewAttachedToWindow`. Two consequences handled here:
-     *
-     *  • `root.layoutParams` is NULL at this point, and `View.setLayoutParams(null)` throws
-     *    (`LayoutParameters cannot be null`). So the wrapper must be built with a concrete
-     *    LayoutParams of its own — never inherited from the parentless root.
-     *  • The chat list isn't inflated/attached yet either, so it can't be found synchronously.
-     *    The bar is therefore installed structurally right away (it doesn't need the RecyclerView),
-     *    and the list is bound later from [onListReady], which retries on the view queue. That is
-     *    deliberately NOT a "re-wrap later" retry: re-wrapping after the root is already attached
-     *    would move the view out of the pager's container into a wrapper nobody adds, leaving the
-     *    page blank.
+     * Runs during `onCreateView`, where the root has NO parent yet, so `root.layoutParams` is null
+     * and `setLayoutParams(null)` would throw — the wrapper therefore carries its own concrete
+     * LayoutParams. The conversation list is also not inflated yet at this point, so it is bound
+     * later from [bindListWhenReady]; the wrapper structure itself needs no RecyclerView.
      */
     fun install(root: View): View {
         val ctx = root.context
-        // Already wrapped this exact root (e.g. an extra layout pass): nothing to do.
         if (root.tag == TAG) return root
         detach()
 
-        val searchBar = buildBar(ctx)
+        val bar = buildBar(ctx)
+        val resultList = buildResults(ctx)
         val hint = buildEmptyHint(ctx)
 
-        val wrap = FrameLayout(ctx).apply {
-            tag = TAG
-            // MATCH/MATCH explicitly: the root has no parent yet, so nothing to inherit. The
-            // pager container assigns real LayoutParams when it attaches the wrapper.
-            layoutParams = FrameLayout.LayoutParams(MATCH, MATCH)
-            addView(root, FrameLayout.LayoutParams(MATCH, MATCH))
-            addView(searchBar, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
+        // The results surface covers the LIST AREA only (below the bar), so it can't hide the bar
+        // while searching. It starts hidden and empty.
+        val resultsLayer = FrameLayout(ctx).apply {
+            visibility = View.GONE
+            setBackgroundColor(M3.surface)
+            addView(resultList, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(hint, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.CENTER))
         }
-        bar = searchBar
+        val wrap = FrameLayout(ctx).apply {
+            tag = TAG
+            layoutParams = FrameLayout.LayoutParams(MATCH, MATCH)
+            addView(root, FrameLayout.LayoutParams(MATCH, MATCH))
+            addView(bar, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
+            addView(resultsLayer, FrameLayout.LayoutParams(MATCH, MATCH, Gravity.BOTTOM))
+        }
+        field = bar.tag as? EditText
         emptyHint = hint
+        resultsLayerId = resultsLayer
 
-        // Bind the list once it exists (and again whenever the page is rebuilt).
+        // The bar owns the top strip; the results layer must start below it. A MATCH_PARENT child
+        // with a topMargin would overflow the ViewGroup by exactly that margin, so instead the
+        // layer is bottom-anchored with a height that leaves the bar's strip free. Re-measured on
+        // every layout pass because the bar's height depends on font scale / insets.
+        val applyInsets = { barH: Int ->
+            if (barH > 0) {
+                (resultsLayer.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                    val parentH = wrap.height
+                    val want = if (parentH > 0) (parentH - barH).coerceAtLeast(0) else MATCH
+                    if (lp.height != want || lp.topMargin != barH) {
+                        lp.height = want
+                        lp.topMargin = barH
+                        lp.gravity = Gravity.TOP
+                        resultsLayer.layoutParams = lp
+                    }
+                }
+            }
+        }
+        bar.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
+            applyInsets(bottom - top)
+        }
+        wrap.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            applyInsets(bar.height)
+        }
+
         bindListWhenReady(wrap, 0)
-
-        Utils.log("ChatsSearchBar: wrapped host root (list binding deferred)")
+        Utils.log("ChatsSearchBar: wrapped host root (search results layer ready)")
         return wrap
     }
 
-    /**
-     * Wait for the conversation list to be inflated inside [wrap], then wire the bar to it.
-     *
-     * The list is a descendant of the fragment's root (which we already host), so this only has to
-     * wait for inflation — it never reparents anything.
-     */
+    /** The overlay that hosts the (own) result list; null until installed. */
+    private var resultsLayerId: View? = null
+
     private fun bindListWhenReady(wrap: View, attempt: Int) {
         val rv = findChatList(wrap)
         if (rv != null) {
-            onListReady(wrap, rv)
+            list = rv
+            Utils.log("ChatsSearchBar: conversation list resolved (${rv.javaClass.simpleName})")
             return
         }
         if (attempt >= 40) {
@@ -128,51 +149,23 @@ object ChatsSearchBar {
         }, 50)
     }
 
-    /** Wire the bar to a resolved list: top inset, filtering, scroll re-evaluation. */
-    private fun onListReady(wrap: View, rv: RecyclerView) {
-        if (list === rv) return
-        list = rv
-        // Reserve room for the overlay: keep the list's top padding in sync with the bar's real
-        // measured height (a one-shot post() reads 0 before the first layout pass).
-        rv.clipToPadding = false
-        bar?.let { b ->
-            b.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
-                val h = bottom - top
-                if (h > 0 && rv.paddingTop != h) {
-                    rv.setPadding(rv.paddingLeft, h, rv.paddingRight, rv.paddingBottom)
-                }
-            }
-        }
-        applyFilterToAttachedRows()
-        attachScrollListener(rv)
-        Utils.log("ChatsSearchBar: bound to ${rv.javaClass.simpleName}")
-    }
-
-    /** Tear down state from a previous host so a stale list/bar can't be filtered. */
     private fun detach() {
-        clearQuery()
-        bar = null
         field = null
-        list = null
+        resultsAdapter = null
         emptyHint = null
+        list = null
+        resultsLayerId = null
         query = ""
     }
 
-    /**
-     * The conversation list under [root], by layout id ONLY.
-     *
-     * No "first RecyclerView found" fallback: the main frame's content pager IS a ViewPager2 (which
-     * extends RecyclerView), and it lives outside this fragment — falling back to whatever
-     * RecyclerView turns up would happily bind the search bar to the pager (or to a nested row
-     * list) and filter the wrong thing. If the id never resolves, the bar simply stays unfiltered.
-     */
+    /** The conversation list under [root], by layout id only (see the class docs). */
     private fun findChatList(root: View): RecyclerView? {
         val id = root.resources.getIdentifier(RV_ID_NAME, "id", root.context.packageName)
         if (id == 0) return null
         return root.findViewById<View>(id) as? RecyclerView
     }
 
-    // ── bar construction ────────────────────────────────────────────────────────────────────────
+    // ── search bar ─────────────────────────────────────────────────────────────────────────────
 
     private fun buildBar(ctx: Context): LinearLayout {
         val et = EditText(ctx).apply {
@@ -187,14 +180,11 @@ object ChatsSearchBar {
                 .apply { setBounds(0, 0, 16.dp, 16.dp) }
             setCompoundDrawables(ic, null, null, null)
             background = M3.rounded(M3.surfaceContainerHigh, M3.radiusPill)
-            // New-page entry (returning to the messages tab) should not steal focus / raise the
-            // keyboard — the bar is a passive input until the user taps it.
-            isFocusableInTouchMode = true
+            // Tapping the field raises the keyboard; the bar never steals focus on page entry.
+            setOnClickListener { showKeyboard(this) }
         }
-        field = et
 
         val clear = TextView(ctx).apply {
-            text = ""
             setPadding(10.dp, 4.dp, 6.dp, 4.dp)
             compoundDrawablePadding = 0
             val ic = MaterialSymbol(MaterialSymbols.close, M3.onSurfaceVariant)
@@ -207,20 +197,45 @@ object ChatsSearchBar {
         et.doAfterTextChanged {
             query = et.text?.toString()?.trim().orEmpty()
             clear.visibility = if (query.isEmpty()) View.GONE else View.VISIBLE
-            applyFilterToAttachedRows()
-            invalidateRows()
+            runSearch()
         }
 
-        val row = LinearLayout(ctx).apply {
+        return LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(12.dp, 8.dp, 12.dp, 6.dp)
+            background = GradientDrawable().apply { setColor(M3.surface) }
             addView(et, LinearLayout.LayoutParams(0, WRAP, 1f))
             addView(clear, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = 4.dp })
+            // Hand the field out to the object state without a second constructor path.
+            tag = et
         }
-        // The bar sits on an opaque M3 surface strip so rows scrolling underneath never show through.
-        row.background = GradientDrawable().apply { setColor(M3.surface) }
-        return row
+    }
+
+    private fun buildResults(ctx: Context): RecyclerView {
+        val adapter = ResultAdapter { row -> openChat(row) }
+        resultsAdapter = adapter
+        return RecyclerView(ctx).apply {
+            layoutManager = LinearLayoutManager(ctx)
+            this.adapter = adapter
+            setBackgroundColor(M3.surface)
+            clipToPadding = false
+            setPadding(0, 4.dp, 0, 8.dp)
+            // While results are on screen they must own the drag. The main frame hosts the pages
+            // in a horizontal pager; without this, a vertical drag that reaches the top/bottom of
+            // the (short) result list is handed to the pager and swipes to another page. Declining
+            // the intercept for the duration of every touch keeps the gesture local.
+            addOnItemTouchListener(object : RecyclerView.OnItemTouchListener {
+                override fun onInterceptTouchEvent(rv: RecyclerView, e: android.view.MotionEvent): Boolean {
+                    rv.parent?.requestDisallowInterceptTouchEvent(true)
+                    return false
+                }
+
+                override fun onTouchEvent(rv: RecyclerView, e: android.view.MotionEvent) {}
+
+                override fun onRequestDisallowInterceptTouchEvent(disallowIntercept: Boolean) {}
+            })
+        }
     }
 
     private fun buildEmptyHint(ctx: Context): TextView = TextView(ctx).apply {
@@ -231,160 +246,166 @@ object ChatsSearchBar {
         visibility = View.GONE
     }
 
-    // ── filtering ──────────────────────────────────────────────────────────────────────────────
+    // ── searching ──────────────────────────────────────────────────────────────────────────────
 
     /**
-     * Re-judge every currently attached row. RecyclerView reuses row views, so a row that was
-     * hidden for one item must be re-shown when it is rebound to a matching item — hence the check
-     * runs on attach as well as on scroll (both funnel through [invalidateRows]).
+     * Read every conversation from the native adapter and show the matches.
      *
-     * Hidden rows are collapsed to zero height as well as GONE: this adapter's rows are positioned
-     * by the layout manager, and a merely-GONE child would leave the slots it occupied as gaps in
-     * the list, so the remaining matches wouldn't close up. Collapsing the row and asking the list
-     * to re-layout makes the matches read as a contiguous result list.
+     * The native list is only READ here. When the query is empty the result layer is hidden
+     * entirely, so the untouched conversation list is what the user sees again.
      */
-    private fun applyFilterToAttachedRows() {
-        val rv = list ?: return
-        var visible = 0
-        var changed = false
-        for (i in 0 until rv.childCount) {
-            val row = rv.getChildAt(i)
-            val text = rowSearchText(rv, row)
-            val match = query.isEmpty() || text.contains(query, ignoreCase = true)
-            if (match) {
-                visible++
-                if (row.visibility != View.VISIBLE || collapsed(row)) {
-                    uncollapse(row)
-                    row.visibility = View.VISIBLE
-                    changed = true
-                }
-            } else {
-                if (row.visibility != View.GONE || !collapsed(row)) {
-                    collapse(row)
-                    row.visibility = View.GONE
-                    changed = true
-                }
+    private fun runSearch() {
+        val layer = resultsLayerId ?: return
+        if (query.isEmpty()) {
+            layer.visibility = View.GONE
+            resultsAdapter?.submit(emptyList())
+            emptyHint?.visibility = View.GONE
+            // Give the list keyboard focus back to the conversation list's own state: just drop it.
+            field?.clearFocus()
+            return
+        }
+        val rows = collectChats()
+        val q = query
+        val hits = rows.filter { it.matches(q) }
+        layer.visibility = View.VISIBLE
+        layer.bringToFront()
+        resultsAdapter?.submit(hits)
+        emptyHint?.visibility = if (hits.isEmpty()) View.VISIBLE else View.GONE
+        emptyHint?.bringToFront()
+        Utils.log("ChatsSearchBar: query='$q' chats=${rows.size} hits=${hits.size}")
+    }
+
+    /** Every conversation the native adapter holds, in list order. */
+    private fun collectChats(): List<ChatRow> {
+        val rv = list ?: return emptyList()
+        val adapter = rv.adapter ?: return emptyList()
+        val getItem = runCatching {
+            adapter.javaClass.getMethod("getItem", Int::class.javaPrimitiveType)
+        }.getOrNull() ?: return emptyList()
+        val out = ArrayList<ChatRow>(adapter.itemCount)
+        for (i in 0 until adapter.itemCount) {
+            val item = runCatching { getItem.invoke(adapter, i) }.getOrNull() ?: continue
+            out.add(ChatRow.of(item) ?: continue)
+        }
+        return out
+    }
+
+    /** Open the tapped chat using the same intent shape the incoming-message notification uses. */
+    private fun openChat(row: ChatRow) {
+        runCatching {
+            val ctx = Utils.application
+            val intent = android.content.Intent().apply {
+                setClassName(ctx, "com.tencent.qqnt.watch.mainframe.MainActivity")
+                action = "com.tencent.qqnt.watch.action.MAINACTIVITY"
+                addFlags(
+                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                )
+                putExtra("open_chatfragment", true)
+                putExtra("tab_index", 0)
+                putExtra("entrance", 6)
+                putExtra("key_peerId", row.peerUid)
+                putExtra("key_peerUin", row.peerUin)
+                putExtra("key_chat_type", row.chatType)
+                putExtra("key_chat_name", row.name)
             }
-        }
-        if (changed) rv.requestLayout()
-        // Only meaningful once the list has content. When the list is still loading (no children)
-        // don't claim "no results".
-        emptyHint?.visibility =
-            if (query.isNotEmpty() && rv.childCount > 0 && visible == 0) View.VISIBLE else View.GONE
-        // Keep the empty hint above the (hidden) rows.
-        emptyHint?.let { if (it.visibility == View.VISIBLE) it.bringToFront() }
+            ctx.startActivity(intent)
+            Utils.log("ChatsSearchBar: open chat peer=${row.peerUid} type=${row.chatType}")
+        }.onFailure { Utils.log("ChatsSearchBar: open chat failed: $it") }
     }
 
-    // ── row collapsing ─────────────────────────────────────────────────────────────────────────
-    // The original height is stashed on the row via a tag index (no extra map, and it travels with
-    // the view through recycling) so restoring is exact for every row type.
-
-    private fun collapsed(row: View): Boolean = row.getTag(COLLAPSE_TAG) != null
-
-    private fun collapse(row: View) {
-        if (collapsed(row)) return
-        row.setTag(COLLAPSE_TAG, row.layoutParams?.height ?: 0)
-        val lp = row.layoutParams
-        if (lp != null) {
-            lp.height = 0
-            (lp as? ViewGroup.MarginLayoutParams)?.let { it.topMargin = 0; it.bottomMargin = 0 }
-            row.layoutParams = lp
-        }
-    }
-
-    private fun uncollapse(row: View) {
-        val original = row.getTag(COLLAPSE_TAG) as? Int ?: return
-        row.setTag(COLLAPSE_TAG, null)
-        val lp = row.layoutParams ?: return
-        lp.height = original
-        row.layoutParams = lp
-    }
-
-    /**
-     * The searchable text of a bound row.
-     *
-     * Resolved from the ADAPTER ITEM rather than the row's visible TextViews: the row also renders
-     * the time and the message preview, and matching against those would surface chats whose name
-     * has nothing to do with the query. The adapter contract here is `getItem(position)` (see
-     * [momoi.mod.qqpro.hook.MainNav.cycleChatUnread], which reads the same list the same way);
-     * `RecentContactChatItem.a` is the `RecentContactInfo` carrying the chat's display name.
-     */
-    private fun rowSearchText(rv: RecyclerView, row: View): String {
-        val pos = rv.getChildAdapterPosition(row)
-        if (pos == RecyclerView.NO_POSITION) return rowFallbackText(row)
-        val item = adapterItemAt(rv, pos) ?: return rowFallbackText(row)
-        val name = peerNameOf(item)
-        return name ?: rowFallbackText(row)
-    }
-
-    private fun adapterItemAt(rv: RecyclerView, pos: Int): Any? = runCatching {
-        val adapter = rv.adapter ?: return null
-        val m = adapter.javaClass.getMethod("getItem", Int::class.javaPrimitiveType)
-        m.invoke(adapter, pos)
-    }.getOrNull()
-
-    /**
-     * The chat's display name from a `RecentContactChatItem` (its `a` field is the
-     * `RecentContactInfo`). Read reflectively: the item class lives in the patched target APK, and
-     * its accessors are R8-minified, so a direct property reference isn't available here.
-     */
-    private fun peerNameOf(item: Any): String? = runCatching {
-        // RecentContactChatItem.a == RecentContactInfo
-        val info = item.javaClass.getField("a").get(item) ?: return null
-        for (name in listOf("peerName", "peerUid")) {
-            val v = runCatching { info.javaClass.getField(name).get(info) as? String }.getOrNull()
-            if (!v.isNullOrBlank()) return v
-        }
-        null
-    }.getOrNull()
-
-    /**
-     * Fallback when the adapter item can't be resolved (e.g. mid-diff, or an unfamiliar item
-     * type): use the row's own name TextView. The store keeps the chat name on the title view, so
-     * pulling every text off the row is the most forgiving option that still matches names.
-     */
-    private fun rowFallbackText(row: View): String {
-        val sb = StringBuilder()
-        fun walk(v: View) {
-            if (v is TextView) {
-                val t = v.text
-                if (!TextUtils.isEmpty(t)) { sb.append(t).append('\n') }
-            } else if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
-        }
-        walk(row)
-        return sb.toString()
-    }
-
-    /** Re-run the filter after the next layout pass (rows attach/rebind during layout). */
-    private fun invalidateRows() {
-        val rv = list ?: return
-        rv.post { runCatching { applyFilterToAttachedRows() }.onFailure { Utils.log("ChatsSearchBar filter: $it") } }
-    }
-
-    /** Hook the list so recycled rows are re-judged as they scroll into view. Called by the host hook. */
-    fun attachScrollListener(rv: RecyclerView) {
-        rv.addOnScrollListener(object : RecyclerView.OnScrollListener() {
-            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-                if (query.isNotEmpty()) applyFilterToAttachedRows()
-            }
-        })
-    }
-
+    /** Show the keyboard for the search field (used when the user taps the field). */
     fun showKeyboard(v: View) {
         runCatching {
-            (v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
-                .showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+            (v.context.getSystemService(Context.INPUT_METHOD_SERVICE)
+                as android.view.inputmethod.InputMethodManager)
+                .showSoftInput(v, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
         }
     }
 
-    /** The installed search field (for hosts that want to focus it), or null when not installed. */
-    fun field(): EditText? = field
-
-    /** Drop any active query (used when the page is being torn down). */
+    /** Drop any active query. Safe to call at any time. */
     fun clearQuery() {
         query = ""
         runCatching { field?.setText("") }
-        runCatching { applyFilterToAttachedRows() }
+        runCatching { resultsAdapter?.submit(emptyList()) }
+        runCatching { resultsLayerId?.visibility = View.GONE }
+    }
+
+    // ── one conversation ───────────────────────────────────────────────────────────────────────
+
+    /** A conversation as read from the native adapter — only the fields the search needs. */
+    class ChatRow(
+        val name: String,
+        val peerUid: String,
+        val peerUin: Long,
+        val chatType: Int,
+    ) {
+        fun matches(q: String): Boolean = name.contains(q, ignoreCase = true)
+
+        companion object {
+            /**
+             * Build a row from a `RecentContactChatItem`. Its `a` field is the `RecentContactInfo`
+             * (same access pattern as `ChatListLongClickMenu`/`有人@我`), read reflectively because
+             * the class lives in the patched target APK with R8-minified accessors.
+             */
+            fun of(item: Any): ChatRow? = runCatching {
+                val info = item.javaClass.getField("a").get(item) ?: return null
+                val uid = runCatching { info.javaClass.getField("peerUid").get(info) as? String }
+                    .getOrNull() ?: return null
+                val remark = runCatching { info.javaClass.getField("remark").get(info) as? String }
+                    .getOrNull()
+                val peerName = runCatching { info.javaClass.getField("peerName").get(info) as? String }
+                    .getOrNull()
+                val uin = runCatching { info.javaClass.getField("peerUin").getLong(info) }
+                    .getOrDefault(0L)
+                val chatType = runCatching { info.javaClass.getField("chatType").getInt(info) }
+                    .getOrDefault(0)
+                val display = remark?.takeIf { it.isNotEmpty() } ?: peerName?.takeIf { it.isNotEmpty() }
+                    ?: uid
+                ChatRow(display, uid, uin, chatType)
+            }.getOrNull()
+        }
+    }
+
+    // ── result list ────────────────────────────────────────────────────────────────────────────
+
+    private class ResultAdapter(
+        val onClick: (ChatRow) -> Unit,
+    ) : RecyclerView.Adapter<ResultAdapter.Row>() {
+        private val rows = ArrayList<ChatRow>()
+
+        class Row(val view: LinearLayout, val name: TextView) : RecyclerView.ViewHolder(view)
+
+        fun submit(list: List<ChatRow>) {
+            rows.clear()
+            rows.addAll(list)
+            notifyDataSetChanged()
+        }
+
+        override fun getItemCount(): Int = rows.size
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Row {
+            val ctx = parent.context
+            val name = TextView(ctx).apply {
+                setTextColor(M3.onSurface)
+                textSize = 13f
+                setSingleLine()
+                ellipsize = TextUtils.TruncateAt.END
+                setPadding(14.dp, 10.dp, 14.dp, 10.dp)
+            }
+            val view = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                background = M3.ripple(M3.rounded(M3.surfaceContainer, M3.radiusLg))
+                addView(name, LinearLayout.LayoutParams(MATCH, WRAP))
+            }
+            return Row(view, name)
+        }
+
+        override fun onBindViewHolder(holder: Row, position: Int) {
+            val row = rows[position]
+            holder.name.text = row.name
+            holder.view.setOnClickListener { onClick(row) }
+        }
     }
 
     private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
