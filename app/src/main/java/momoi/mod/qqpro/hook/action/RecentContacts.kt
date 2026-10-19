@@ -45,7 +45,10 @@ class ChatListMaterial : ChatListFragment() {
         }
         // Keep DM presence dots fresh as status pushes arrive (gated inside).
         wireRecentOnlineRefresh(root)
-        return root
+        // Search box pinned above the conversation list. Wraps the fragment's root as an overlay
+        // (the list is never reparented) and filters by hiding non-matching rows — see
+        // [momoi.mod.qqpro.hook.chatlist.ChatsSearchBar] for why it doesn't re-submit the adapter.
+        return momoi.mod.qqpro.hook.chatlist.ChatsSearchBar.install(root)
     }
 }
 
