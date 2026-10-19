@@ -80,52 +80,38 @@ object ChatsSearchBar {
         val resultList = buildResults(ctx)
         val hint = buildEmptyHint(ctx)
 
-        // The results surface covers the LIST AREA only (below the bar), so it can't hide the bar
-        // while searching. It starts hidden and empty.
+        // The results surface occupies exactly the same slot as the conversation list (it replaces
+        // it visually while a query is active), so the bar never overlaps either of them.
         val resultsLayer = FrameLayout(ctx).apply {
             visibility = View.GONE
             setBackgroundColor(M3.surface)
             addView(resultList, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(hint, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.CENTER))
         }
-        val wrap = FrameLayout(ctx).apply {
-            tag = TAG
-            layoutParams = FrameLayout.LayoutParams(MATCH, MATCH)
+
+        // bar and content stack VERTICALLY (a horizontal split, not an overlay): the search field
+        // gets its own row and the list starts below it, so the bar can never cover the first
+        // conversation row. The content area is weighted 1 so it takes the remaining height.
+        val content = FrameLayout(ctx).apply {
             addView(root, FrameLayout.LayoutParams(MATCH, MATCH))
-            addView(bar, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
-            addView(resultsLayer, FrameLayout.LayoutParams(MATCH, MATCH, Gravity.BOTTOM))
+            addView(resultsLayer, FrameLayout.LayoutParams(MATCH, MATCH))
+        }
+
+        val wrap = LinearLayout(ctx).apply {
+            tag = TAG
+            orientation = LinearLayout.VERTICAL
+            // The pager will assign its own LayoutParams when it attaches this; until then it must
+            // still hold a valid instance (null would throw in setLayoutParams).
+            layoutParams = ViewGroup.LayoutParams(MATCH, MATCH)
+            addView(bar, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(content, LinearLayout.LayoutParams(MATCH, 0, 1f))
         }
         field = bar.tag as? EditText
         emptyHint = hint
         resultsLayerId = resultsLayer
 
-        // The bar owns the top strip; the results layer must start below it. A MATCH_PARENT child
-        // with a topMargin would overflow the ViewGroup by exactly that margin, so instead the
-        // layer is bottom-anchored with a height that leaves the bar's strip free. Re-measured on
-        // every layout pass because the bar's height depends on font scale / insets.
-        val applyInsets = { barH: Int ->
-            if (barH > 0) {
-                (resultsLayer.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
-                    val parentH = wrap.height
-                    val want = if (parentH > 0) (parentH - barH).coerceAtLeast(0) else MATCH
-                    if (lp.height != want || lp.topMargin != barH) {
-                        lp.height = want
-                        lp.topMargin = barH
-                        lp.gravity = Gravity.TOP
-                        resultsLayer.layoutParams = lp
-                    }
-                }
-            }
-        }
-        bar.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
-            applyInsets(bottom - top)
-        }
-        wrap.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            applyInsets(bar.height)
-        }
-
         bindListWhenReady(wrap, 0)
-        Utils.log("ChatsSearchBar: wrapped host root (search results layer ready)")
+        Utils.log("ChatsSearchBar: wrapped host root (bar row + content row)")
         return wrap
     }
 
