@@ -79,7 +79,6 @@ object ChatsSearchBar {
         val bar = buildBar(ctx)
         val resultList = buildResults(ctx)
         val hint = buildEmptyHint(ctx)
-
         // The results surface occupies exactly the same slot as the conversation list (it replaces
         // it visually while a query is active), so the bar never overlaps either of them.
         val resultsLayer = FrameLayout(ctx).apply {
@@ -111,8 +110,66 @@ object ChatsSearchBar {
         resultsLayerId = resultsLayer
 
         bindListWhenReady(wrap, 0)
+        installBackHandler(wrap)
         Utils.log("ChatsSearchBar: wrapped host root (bar row + content row)")
         return wrap
+    }
+
+    /**
+     * While a query is active, BACK must close the search instead of leaving the app.
+     *
+     * The bar is part of the messages page, so a back press with the search open was popping the
+     * activity — the user expects it to just dismiss the search. Registered against the hosting
+     * fragment's lifecycle, but only AFTER the view is attached: during `onCreateView` the
+     * fragment's view lifecycle doesn't exist yet, so the first attempt is deferred to the wrap's
+     * onAttachedToWindow (guarded so re-attaches don't stack callbacks).
+     */
+    private fun installBackHandler(wrap: View) {
+        if (backHandlerInstalled) return
+        if (wrap.isAttachedToWindow) {
+            registerBackHandler(wrap)
+            return
+        }
+        wrap.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {
+                v.removeOnAttachStateChangeListener(this)
+                registerBackHandler(v)
+            }
+
+            override fun onViewDetachedFromWindow(v: View) {}
+        })
+    }
+
+    private fun registerBackHandler(wrap: View) {
+        if (backHandlerInstalled) return
+        runCatching {
+            val activity = wrap.context.findActivity() ?: return
+            // Registered against the ACTIVITY (no LifecycleOwner needed): viewLifecycleOwner does
+            // not exist during onCreateView, and ViewTreeLifecycleOwner isn't on the compile
+            // classpath here. The callback is disabled whenever no search is open, so it never
+            // swallows an ordinary back press, and it is torn down with the page in detach().
+            val cb = object : androidx.activity.OnBackPressedCallback(false) {
+                override fun handleOnBackPressed() {
+                    clearQuery()
+                }
+            }
+            activity.onBackPressedDispatcher.addCallback(cb)
+            backCallback = cb
+            backHandlerInstalled = true
+            Utils.log("ChatsSearchBar: back handler registered")
+        }.onFailure { Utils.log("ChatsSearchBar: back handler failed: $it") }
+    }
+
+    private var backCallback: androidx.activity.OnBackPressedCallback? = null
+    private var backHandlerInstalled = false
+
+    private fun Context.findActivity(): androidx.activity.ComponentActivity? {
+        var c: Context? = this
+        while (c != null) {
+            if (c is androidx.activity.ComponentActivity) return c
+            c = (c as? android.content.ContextWrapper)?.baseContext
+        }
+        return null
     }
 
     /** The overlay that hosts the (own) result list; null until installed. */
@@ -136,6 +193,11 @@ object ChatsSearchBar {
     }
 
     private fun detach() {
+        // Drop the previous page's back callback: it holds the activity dispatcher, and a stale
+        // one would keep intercepting back for a view that no longer exists.
+        runCatching { backCallback?.remove() }
+        backCallback = null
+        backHandlerInstalled = false
         field = null
         resultsAdapter = null
         emptyHint = null
@@ -242,6 +304,9 @@ object ChatsSearchBar {
      */
     private fun runSearch() {
         val layer = resultsLayerId ?: return
+        // Back is only "close the search" while a search is actually open; otherwise the callback
+        // stays disabled and back keeps its normal meaning (leave the page / app).
+        backCallback?.isEnabled = query.isNotEmpty()
         if (query.isEmpty()) {
             layer.visibility = View.GONE
             resultsAdapter?.submit(emptyList())
@@ -312,9 +377,24 @@ object ChatsSearchBar {
     /** Drop any active query. Safe to call at any time. */
     fun clearQuery() {
         query = ""
-        runCatching { field?.setText("") }
+        // Disable before clearing the text so the resulting empty-query runSearch can't leave a
+        // disabled callback behind on the next real back press.
+        backCallback?.isEnabled = false
+        runCatching {
+            val f = field
+            if (f != null && f.text.isNotEmpty()) {
+                f.setText("")
+                f.clearFocus()
+                runCatching {
+                    (f.context.getSystemService(Context.INPUT_METHOD_SERVICE)
+                        as android.view.inputmethod.InputMethodManager)
+                        .hideSoftInputFromWindow(f.windowToken, 0)
+                }
+            }
+        }
         runCatching { resultsAdapter?.submit(emptyList()) }
         runCatching { resultsLayerId?.visibility = View.GONE }
+        runCatching { emptyHint?.visibility = View.GONE }
     }
 
     // ── one conversation ───────────────────────────────────────────────────────────────────────
