@@ -452,6 +452,9 @@ object MainNav {
         // Last selected page actually rendered — distinguishes a pure page switch (animate) from a
         // settings/badge change or first paint (instant).
         var lastCurrent = -1
+        // The QZone count poll loop armed on this nav, so a re-install can cancel the previous one
+        // instead of stacking a second forever-ticking runnable on the same view.
+        var qzonePoll: Runnable? = null
     }
 
     class Cell(
@@ -467,7 +470,7 @@ object MainNav {
     /** Live unread updates pushed by the kernel; recompute badges in place. */
     class UnreadListener : IKernelRecentContactListener {
         override fun onMsgUnreadCountUpdate(map: HashMap<String, Int>?) {
-            if (map != null) { unread.putAll(map); refresh() }
+            if (map != null) { unread.putAll(map); unreadDirty = true; refresh() }
         }
         override fun onRecentContactListChanged(
             sorted: ArrayList<Long>?, changed: ArrayList<RecentContactInfo>?, extra: RecentContactExtra?,
@@ -486,16 +489,33 @@ object MainNav {
         val uid = c?.peerUid ?: return
         if (uid.isEmpty()) return
         unread[uid] = c.unreadCnt.toInt()
+        unreadDirty = true
         // Capture the muted/DND state the kernel carries so DND chats are excluded from the badge
         // total even before their list row renders (see RecentContacts.mutedMap).
         RecentContacts.recordMuted(uid, RecentContacts.isMuted(c.isMsgDisturb, c.shieldFlag))
     }
 
+    /**
+     * Cached "total unread" for the message tab.
+     *
+     * This walks the WHOLE recent-contact map (a union of our kernel-fed [unread] map and
+     * [RecentContacts.map], then filters by DND) and used to run on every render — including the
+     * unconditional 8-second QZone poll, so a device sitting on the home page re-summed every
+     * conversation it has ever seen, forever. The inputs only change when the kernel pushes, so the
+     * result is memoised and invalidated by [put] / the unread-count listener.
+     */
+    @Volatile private var unreadDirty = true
+    private var unreadTotalCache = 0
+
     private fun messagesUnread(): Int {
+        if (!unreadDirty) return unreadTotalCache
         RecentContacts.map.forEach { (k, v) -> if (!unread.containsKey(k)) unread[k] = v.unreadCntCached }
-        return unread.entries
+        val total = unread.entries
             .filter { it.value > 0 && !RecentContacts.isDisturb(it.key) }
             .sumOf { it.value }
+        unreadTotalCache = total
+        unreadDirty = false
+        return total
     }
 
     private fun unreadFor(state: NavState, page: Int): Int = when {
@@ -813,13 +833,23 @@ object MainNav {
      */
     private fun scheduleQzonePoll(state: NavState) {
         val nav = state.nav
-        nav.postDelayed(object : Runnable {
+        // Cancel any previous loop for this nav before arming a new one, so a re-install (returning
+        // to the home page) can't leave two independent ticks running against the same view —
+        // each one re-rendering forever while the other still refers to a stale NavState.
+        state.qzonePoll?.let { nav.removeCallbacks(it) }
+        val poll = object : Runnable {
             override fun run() {
-                if (active !== state) return
+                if (active !== state) { state.qzonePoll = null; return }
+                // Only tick while the nav is actually on screen: a detached view would queue the
+                // post anyway, but skipping here also stops the render work when the home page is
+                // merely covered (e.g. a chat is open on top).
+                if (!nav.isShown) { nav.postDelayed(this, QZONE_POLL_MS); return }
                 render(state)
                 nav.postDelayed(this, QZONE_POLL_MS)
             }
-        }, QZONE_POLL_MS)
+        }
+        state.qzonePoll = poll
+        nav.postDelayed(poll, QZONE_POLL_MS)
     }
 
     /**
@@ -1453,14 +1483,41 @@ object MainNav {
      * ViewPager2 — both expose getAdapter/getCurrentItem/setCurrentItem with the same signatures.
      */
     class PagerCtl(val pager: View) {
+        /**
+         * Cached reflective handles.
+         *
+         * These were resolved through `javaClass.getMethod(...)` on EVERY call, and [current] is
+         * called on every render — which includes the periodic QZone tick on the home page. Method
+         * lookup is not free (it allocates and walks the class hierarchy): caching the resolved
+         * Methods once turns the steady state into a plain invoke.
+         */
+        private val getAdapterM by lazy {
+            runCatching { pager.javaClass.getMethod("getAdapter") }.getOrNull()
+        }
+        private val getCurrentItemM by lazy {
+            runCatching { pager.javaClass.getMethod("getCurrentItem") }.getOrNull()
+        }
+        private var itemCountM: java.lang.reflect.Method? = null
+        private var itemCountResolved = false
+
         fun count(): Int = runCatching {
-            val adapter = pager.javaClass.getMethod("getAdapter").invoke(pager) ?: return 0
-            runCatching { adapter.javaClass.getMethod("getItemCount").invoke(adapter) as Int }
-                .getOrElse { adapter.javaClass.getMethod("getCount").invoke(adapter) as Int }
+            val adapter = getAdapterM?.invoke(pager) ?: return 0
+            val m = resolveItemCount(adapter)
+                ?: return 0
+            m.invoke(adapter) as Int
         }.getOrDefault(0)
 
+        private fun resolveItemCount(adapter: Any): java.lang.reflect.Method? {
+            if (itemCountResolved) return itemCountM
+            itemCountM = runCatching { adapter.javaClass.getMethod("getItemCount") }
+                .recoverCatching { adapter.javaClass.getMethod("getCount") }
+                .getOrNull()
+            itemCountResolved = true
+            return itemCountM
+        }
+
         fun current(): Int = runCatching {
-            pager.javaClass.getMethod("getCurrentItem").invoke(pager) as Int
+            getCurrentItemM?.invoke(pager) as Int
         }.getOrDefault(0)
 
         fun setCurrent(i: Int) {

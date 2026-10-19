@@ -39,8 +39,26 @@ import java.util.WeakHashMap
  */
 object LinkPreview {
     private val cards = WeakHashMap<AIOCellGroupWidget, Card>()
-    private val cache = HashMap<String, Og?>()
+    /**
+     * Resolved OpenGraph metadata, bounded (see [CACHE_ENTRIES]).
+     *
+     * Plain HashMap before: one entry per distinct URL ever previewed in any chat, held for the
+     * process lifetime — each carrying a title, description and up to a few hundred chars of page
+     * metadata. Long sessions browsing link-heavy groups grew this without bound. An LruCache keeps
+     * the recent links (what actually gets re-bound while scrolling) and drops the rest.
+     *
+     * LruCache rejects null values, so the previous "cached null = tried, nothing usable" state is
+     * represented by [NONE] instead of a null value.
+     */
+    private val cache = object : android.util.LruCache<String, Any>(CACHE_ENTRIES) {
+        override fun sizeOf(key: String, value: Any) = 1
+    }
+    private object NONE
+    private const val CACHE_ENTRIES = 200
     private const val RESOLVING = "解析中…"
+
+    /** Cached result for [url]: an [Og], [NONE] (tried, nothing usable), or null (never fetched). */
+    private fun cached(url: String): Any? = cache[url]
 
     /** Hide any preview card on this cell (used when a special-message hook owns it). */
     fun hide(widget: AIOCellGroupWidget) {
@@ -173,9 +191,10 @@ object LinkPreview {
         }
 
         fun show(url: String) {
-            // Known-unresolvable (cached null): keep the card hidden even though the
+            // Known-unresolvable (cached NONE): keep the card hidden even though the
             // caller just set it VISIBLE on rebind.
-            if (cache.containsKey(url) && cache[url] == null) {
+            val hit = cached(url)
+            if (hit === NONE) {
                 boundUrl = url
                 render(url, null)
                 return
@@ -192,11 +211,10 @@ object LinkPreview {
             desc.visibility = View.GONE
             image.visibility = View.GONE
 
-            cache[url]?.let { render(url, it); return }
-            if (cache.containsKey(url)) { render(url, null); return }
+            if (hit is Og) { render(url, hit); return }
 
             LinkPreview.resolve(url) { og ->
-                cache[url] = og
+                cache.put(url, og ?: NONE)
                 runOnUi { if (boundUrl == url) render(url, og) }
             }
         }

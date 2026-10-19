@@ -132,8 +132,28 @@ object GroupAvatarHook {
     // eventually show up instead of being pinned to the first-ever download.
     private const val AVATAR_CACHE_TTL_MS = 6L * 60 * 60 * 1000 // 6 hours
 
+    /**
+     * How many decoded avatars stay resident. Each entry is ~40 KB (100px ARGB_8888), so this
+     * bounds the cache at roughly 12 MB while still covering every sender of a busy group plus
+     * the neighbours you scroll past. See [avatarBitmaps].
+     */
+    private const val AVATAR_LRU_ENTRIES = 300
+
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val avatarBitmaps = HashMap<Long, Bitmap>()
+    /**
+     * Decoded circular avatars, bounded.
+     *
+     * This used to be a plain HashMap<Long, Bitmap> that only ever grew: every distinct sender
+     * uin ever rendered in any group — plus every uin from a merged-forward viewer — pinned a
+     * ~100px ARGB_8888 bitmap (≈40 KB) for the whole process lifetime. Scroll through a few busy
+     * groups over a long session and that is tens of megabytes of never-freed pixels, which is
+     * exactly the "gets slower and slower the longer you use it" symptom (constant GC pressure +
+     * a bigger heap to sweep). An LruCache keyed by uin keeps the working set (the avatars
+     * currently on screen / recently seen) and lets the rest go.
+     */
+    private val avatarBitmaps = object : android.util.LruCache<Long, Bitmap>(AVATAR_LRU_ENTRIES) {
+        override fun sizeOf(key: Long, value: Bitmap) = 1
+    }
     private val pendingCallbacks = HashMap<Long, ArrayDeque<() -> Unit>>()
     private val widgetCurrentUin = WeakHashMap<AIOCellGroupWidget, Long>()
     private val nickViewCurrentUin = WeakHashMap<TextView, Long>()
@@ -155,13 +175,16 @@ object GroupAvatarHook {
             nickView.setCompoundDrawables(null, null, null, null)
             val needsDownload = !pendingCallbacks.containsKey(uin)
             pendingCallbacks.getOrPut(uin) { ArrayDeque() }.addLast {
+                // The cache is an LruCache now, so a bitmap can be evicted between the bind and
+                // this callback — never assume it is still there.
+                val bmp = avatarBitmaps[uin] ?: return@addLast
                 if (nickViewCurrentUin[nickView] == uin) {
-                    applyAvatar(nickView, avatarBitmaps[uin]!!, placeEnd)
+                    applyAvatar(nickView, bmp, placeEnd)
                 }
             }
             if (needsDownload) {
                 loadAvatarBitmap(uin) { bmp ->
-                    avatarBitmaps[uin] = bmp
+                    avatarBitmaps.put(uin, bmp)
                     pendingCallbacks.remove(uin)?.forEach { it() }
                 }
             }
@@ -198,15 +221,17 @@ object GroupAvatarHook {
                 nickView.setCompoundDrawables(null, null, null, null)
                 val needsDownload = !pendingCallbacks.containsKey(uin)
                 pendingCallbacks.getOrPut(uin) { ArrayDeque() }.addLast {
+                    // LruCache: the entry may have been evicted while this download was in flight.
+                    val bmp = avatarBitmaps[uin] ?: return@addLast
                     if (widgetCurrentUin[widget] == uin) {
                         widget.getNickWidget<TextView>()?.let { nv ->
-                            applyAvatar(nv, avatarBitmaps[uin]!!, isSelf)
+                            applyAvatar(nv, bmp, isSelf)
                         }
                     }
                 }
                 if (needsDownload) {
                     loadAvatarBitmap(uin) { bmp ->
-                        avatarBitmaps[uin] = bmp
+                        avatarBitmaps.put(uin, bmp)
                         pendingCallbacks.remove(uin)?.forEach { it() }
                     }
                 }
@@ -298,7 +323,7 @@ object GroupAvatarHook {
      * Returns how many cache files were deleted.
      */
     fun clearAvatarCache(): Int {
-        avatarBitmaps.clear()
+        avatarBitmaps.evictAll()
         pendingCallbacks.clear()
         val cacheDir = Utils.application.externalCacheDir
             ?: Utils.application.cacheDir

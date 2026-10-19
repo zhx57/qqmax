@@ -124,6 +124,23 @@ object InlineInput {
     private var currentChatKey: String? = null
     private val draftPrefs by lazy { Utils.application.getSharedPreferences("qqpro_drafts", 0) }
 
+    /**
+     * Drop a chat's in-memory draft once its text is empty and there is no reply target.
+     *
+     * Both maps are keyed by "chatType:peerUid" and are only ever OVERWRITTEN, never removed —
+     * so every chat ever opened kept an entry (an empty SpannableStringBuilder per chat, forever)
+     * for the whole session. Typing then deleting in a few dozen chats left dozens of dead entries
+     * behind, one per chat, each also keeping its serialized form's key alive in the map. Removing
+     * the empty ones costs nothing (they restore as "no draft" anyway) and keeps the maps at
+     * "chats that actually hold a draft".
+     */
+    private fun pruneDraft(key: String, text: CharSequence?) {
+        if ((text?.length ?: 0) == 0 && replyDrafts[key] == null) {
+            drafts.remove(key)
+            replyDrafts.remove(key)
+        }
+    }
+
     private fun chatKey(): String? {
         val uid = CurrentContact.peerUid
         if (uid.isNullOrEmpty()) return null
@@ -146,6 +163,7 @@ object InlineInput {
         }
         drafts[key] = SpannableStringBuilder(et.text ?: "")
         replyDrafts[key] = reply
+        pruneDraft(key, drafts[key])
         // Mirror to disk so the draft survives an app restart.
         runCatching {
             val json = serializeDraft(et)

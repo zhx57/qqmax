@@ -410,7 +410,7 @@ object CurrentMsgList {
             // Diagnostic: capture what the kernel handed us vs our accumulated mirror, so an
             // empty RecyclerView (incoming list size 0 → blank chat) is distinguishable from a
             // render-side problem (non-zero list but cells invisible). peer ties it to the chat.
-            Utils.log("MsgList.n: peer=${CurrentContact.peerUid} updateType=$updateType incomingSize=${list.size} mirrorSize=${msg.size} types=[${list.take(8).joinToString(",") { runCatching { "${it.d.msgType}/${it.javaClass.simpleName}" }.getOrElse { "?" } }}]")
+            if (Utils.loggingEnabled) Utils.log("MsgList.n: peer=${CurrentContact.peerUid} updateType=$updateType incomingSize=${list.size} mirrorSize=${msg.size} types=[${list.take(8).joinToString(",") { runCatching { "${it.d.msgType}/${it.javaClass.simpleName}" }.getOrElse { "?" } }}]")
             // Seq-positioned merge: reconcile the incoming state into the accumulated mirror and
             // render the merged result. Both lists are oldest-first.
             //
@@ -433,6 +433,63 @@ object CurrentMsgList {
             //    - duplicates in the incoming batch (already emitted) are skipped.
             //    The remaining mirror tail flushes last. The merged result becomes both the render
             //    list and the new mirror.
+            // ── Fast path: the incoming window is just the newest slice of the mirror ──────────
+            // (same msgIds, same order, nothing unseen, nothing older). This is the overwhelmingly
+            // common push: a new incoming message, a read-receipt / status update, a sticker
+            // refresh — the kernel re-hands the newest few items. The full merge below is O(loaded
+            // history) per push (an ArrayList sized to the whole list + an msgId→index HashMap +
+            // a branch per item), so on a chat that has been open for a while with history paged
+            // in, EVERY such update walks thousands of items on the main thread. That is what makes
+            // the list feel progressively heavier the longer a chat has been used — and it is
+            // entirely avoidable when the window lines up with the tail we already hold.
+            //
+            // Older-history results (updateType bit 0x4) are excluded: those genuinely insert
+            // items before the known ones and must go through the merge.
+            val tailStart = msg.size - list.size
+            if (list.isNotEmpty() && tailStart >= 0 && (updateType and 4) == 0) {
+                var aligned = true
+                run {
+                    val inc = list.iterator()
+                    var gi = tailStart
+                    while (inc.hasNext()) {
+                        if (gi >= msg.size || inc.next().d.msgId != msg[gi].d.msgId) {
+                            aligned = false
+                            break
+                        }
+                        gi++
+                    }
+                }
+                if (aligned) {
+                    var gi = tailStart
+                    val inc = list.listIterator()
+                    while (inc.hasNext()) {
+                        val item = inc.next()
+                        AntiRecallVault.put(item)
+                        // Same anti-recall rule as the merge: a peer recall must not replace the
+                        // original, so the mirror's kept item is written back into the render list.
+                        val peerRecall = momoi.mod.qqpro.Settings.antiRecall.value &&
+                            item.d.recallTime > 0L && item.d.senderUid != SelfContact.peerUid
+                        if (peerRecall) {
+                            inc.set(msg[gi])
+                        } else {
+                            msg[gi] = item
+                        }
+                        gi++
+                    }
+                    // Always notify: loadOlderPage / loadMoreMsg use the observer as a "state was
+                    // pushed" wake-up, so skipping the call on an unchanged window would leave a
+                    // waiter hanging. update() with the same instance does no copying.
+                    msgList.update(msg)
+                    // Hand the FULL mirror to the native render — same contract as the merge path,
+                    // but as one arraycopy instead of a per-item rebuild.
+                    list.clear()
+                    list.addAll(msg)
+                    forceBottomAlign()
+                    super.n(list as MsgListUiState, uiHelper)
+                    return
+                }
+            }
+
             val merged = ArrayList<WatchAIOMsgItem>(msg.size + list.size)
             val indexById = HashMap<Long, Int>(msg.size * 2)
             msg.forEachIndexed { i, it -> indexById.putIfAbsent(it.d.msgId, i) }

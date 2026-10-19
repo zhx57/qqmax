@@ -199,12 +199,15 @@ object AIOCell {
             runCatching {
                 ChatMultiSelect.bindCell(view, item.d.msgId, item.d.msgType)
             }.onFailure { Utils.log("ChatMultiSelect.bindCell failed: $it") }
-            // Universal per-bind diagnostic: log EVERY message as it binds, not just the
-            // WatchToQQView placeholder / text bubbles. Previously most cell types (pic, mix,
-            // ark, file, forward, markdown, …) emitted no log line at all, so messages appeared
-            // to "go missing" and couldn't be pinned. Element type + presence here identifies the
-            // exact kind of any message (incl. the ones that fall through to other cells).
-            runCatching {
+            // Universal per-bind diagnostic — only when logging is actually on.
+            //
+            // Utils.log() itself early-returns when 启用日志 is off, but the CALLER still evaluates the
+            // arguments first: elementContent() reflects over every field of every element, allocates
+            // strings and takes substrings for EVERY message that scrolls into view. That is pure
+            // wasted main-thread work on the hot scroll/bind path (and it's what makes a long chat
+            // feel progressively draggy). Gating the whole block behind loggingEnabled() skips the
+            // reflection entirely in normal use.
+            if (Utils.loggingEnabled) runCatching {
                 val r = item.d
                 val els = runCatching { r.elements }.getOrNull().orEmpty()
                 val parts = els.joinToString(" | ") { e ->
@@ -221,7 +224,7 @@ object AIOCell {
             // message actually carries, so we can tell whether the content is present client-side (some
             // typed element non-null → potentially renderable with a new cell hook) or the watch only
             // received a server-side stub (no usable element → not recoverable on the watch).
-            if (item is WatchToQQViewMsgItem) runCatching {
+            if (item is WatchToQQViewMsgItem && Utils.loggingEnabled) runCatching {
                 val r = item.d
                 val els = runCatching { r.elements }.getOrNull().orEmpty()
                 Utils.log("UnsupportedMsg msgType=${r.msgType} subType=${r.subMsgType} elementCount=${els.size} content='${item.o}'")
@@ -375,7 +378,9 @@ object AIOCell {
                     it.requestLayout()
                     // Diagnostic: dump the full ancestor lp chain for wrapped plain-text cells so we
                     // can see exactly what is forcing the bubble height on the real device.
-                    if (it.parent is LinearLayout) {
+                    // Gated: this ran per text-message bind and built an 8-level string even with
+                    // logging off.
+                    if (it.parent is LinearLayout && Utils.loggingEnabled) {
                         val sb = StringBuilder("bubble-chain text='${it.text?.take(8)}' ")
                         var v: View? = it
                         var depth = 0

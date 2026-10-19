@@ -192,20 +192,34 @@ private fun kernelLoadPic(
 
     // Poll for the file to land (the native cell preloads originals too); avoids the
     // "error first, reopen fixes it" race when our trigger's status comes back failed.
+    //
+    // The poller is a one-shot per viewer: it stops itself on success or after 30 s. Progress is
+    // also pushed here because the kernel callback (above) can miss the file when the native cell
+    // already had it. Runs on the main looper, so it costs a main-thread wake-up every 120 ms while
+    // the image is loading — that is why it must not survive the download.
     val handler = android.os.Handler(android.os.Looper.getMainLooper())
     val start = android.os.SystemClock.uptimeMillis()
-    handler.postDelayed(object : Runnable {
+    var finished = false
+    val poll: Runnable = object : Runnable {
         override fun run() {
+            if (finished) return
             // Determinate progress from the cell's RICH_MEDIA bind payload (captured in ImagePlay.i).
             MediaDownloadProgress.get(runCatching { cellItem.d.msgId }.getOrDefault(0L))?.let { onProgress(it) }
             val p = readyPath()
             when {
-                p != null -> { Utils.log("ImagePlay: kernel path landed via poll"); onDone(p) }
+                p != null -> {
+                    finished = true
+                    MediaDownloadProgress.clear(runCatching { cellItem.d.msgId }.getOrDefault(0L))
+                    Utils.log("ImagePlay: kernel path landed via poll"); onDone(p)
+                }
                 android.os.SystemClock.uptimeMillis() - start > 30_000L -> {
+                    finished = true
+                    handler.removeCallbacks(this)
                     Utils.log("ImagePlay: kernel download timed out"); onDone(null)
                 }
                 else -> handler.postDelayed(this, 120)
             }
         }
-    }, 500)
+    }
+    handler.postDelayed(poll, 500)
 }

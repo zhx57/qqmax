@@ -43,7 +43,9 @@ object BubbleCorner {
 
     fun apply(widget: AIOCellGroupWidget) {
         val wrapper = runCatching { widget.getLongClickWrapper<View>() }.getOrNull()
-        Utils.log("BubbleCorner: wrapper=${wrapper?.javaClass?.simpleName} bg=${wrapper?.background?.javaClass?.simpleName} loc=${runCatching { widget.locationType }.getOrNull()}")
+        // Per-bind diagnostic — gate it: apply() runs for every cell on every rebind, and the
+        // argument string (three reflective class lookups) was built even with logging off.
+        if (Utils.loggingEnabled) Utils.log("BubbleCorner: wrapper=${wrapper?.javaClass?.simpleName} bg=${wrapper?.background?.javaClass?.simpleName} loc=${runCatching { widget.locationType }.getOrNull()}")
         if (wrapper == null) return
         val bg = wrapper.background ?: return
         // Already replaced by us (native didn't re-set the nine-patch this bind) — leave it.

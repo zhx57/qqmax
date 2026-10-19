@@ -14,10 +14,30 @@ import java.util.concurrent.ConcurrentHashMap
  * `fileProgress`/`totalSize`. [capture] digs that out of whatever payload shape arrives.
  */
 object MediaDownloadProgress {
+    /**
+     * msgId → progress, bounded.
+     *
+     * Every image/video cell bind inserts an entry here and almost nothing calls [clear] (the
+     * viewers only clear the one message they were opened for). Over a long session that is one
+     * immortal entry per media message ever scrolled past — an unbounded map keyed by message id,
+     * and since msgIds are monotonically increasing longs, its boxed keys are also churn for the
+     * GC. Only a handful of messages are ever "currently downloading" at once, so keep the most
+     * recent [MAX_ENTRIES] and drop older ones in bulk rather than tracking a full LRU (progress
+     * entries are cheap to recompute on the next bind anyway).
+     */
+    private const val MAX_ENTRIES = 512
     private val map = ConcurrentHashMap<Long, Float>()
 
     fun get(msgId: Long): Float? = map[msgId]
     fun clear(msgId: Long) { map.remove(msgId) }
+
+    private fun prune() {
+        if (map.size <= MAX_ENTRIES) return
+        // Drop the oldest half: msgIds are time-ordered, so the smallest ids are the least likely
+        // to be bound again. One bulk pass instead of per-insert bookkeeping.
+        val cutoff = map.keys.sorted().let { it[it.size / 2] }
+        map.keys.removeAll { it <= cutoff }
+    }
 
     /** Extract download progress from bind [payloads] and store it under [msgId]. Fail-safe. */
     fun capture(msgId: Long, payloads: List<Any>) {
@@ -35,6 +55,7 @@ object MediaDownloadProgress {
                     }
                 }
             }
+            prune()
         }
     }
 }
