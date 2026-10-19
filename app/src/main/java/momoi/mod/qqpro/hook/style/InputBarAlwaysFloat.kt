@@ -44,6 +44,13 @@ class InputBarAlwaysFloat(
         if (Settings.keepInputBarOnScroll.value && !isWholeMutedForSelf()) {
             if (g != 2) {
                 Utils.log("InputBarAlwaysFloat: redirect showSliver(immediate=$immediate) -> float (state=$g)")
+                // This flips the bar from the list-footer home to the floating overlay, i.e. it
+                // REMOVES and re-ADDS the view tree that holds our ImeEditText. Request a focus
+                // restore across the move so the box (and the keyboard) keeps working; the detach
+                // path clears focus first so the window never draws with a detached focused view
+                // (see ImeEditText.onDetachedFromWindow — that crash is
+                // "parameter must be a descendant of this view").
+                momoi.mod.qqpro.hook.InlineInput.markReparentFocusRestore()
                 // m = showArrowListener; onClick runs showFlowInput → state 2. Pass a real, always-built
                 // view (the sliver container) so EventCollector inside onClick never sees a null view.
                 m.onClick(d())

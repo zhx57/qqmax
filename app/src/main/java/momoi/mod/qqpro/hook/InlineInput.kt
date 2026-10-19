@@ -268,6 +268,20 @@ object InlineInput {
 
     private fun editText(): ImeEditText? = editTextRef?.get()
 
+    /**
+     * Called right BEFORE the input bar is reparented (footer ↔ floating overlay).
+     *
+     * The move removes and re-adds the view tree holding the inline EditText. If the box owned
+     * focus at that point, the window was left drawing with a focused view that is no longer a
+     * descendant of the view tree, which crashes on the next frame in
+     * `ViewRootImpl.scrollToRectOrFocus` with `parameter must be a descendant of this view`.
+     * [ImeEditText] drops focus on detach; this flag asks it to take focus back on re-attach so a
+     * move prompted by typing doesn't silently kill the keyboard.
+     */
+    fun markReparentFocusRestore() {
+        editText()?.restoreFocusAfterReparent = true
+    }
+
     /** Called from the input-bar hook each time the inline pill is (re)built for a chat. */
     fun register(editText: ImeEditText, controller: InputBarController) {
         val prev = editTextRef?.get()

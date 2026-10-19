@@ -34,6 +34,52 @@ class ImageTag(val element: MsgElement) : InlineTag
 @Suppress("DEPRECATION")
 class ImeEditText(context: Context) : android.widget.EditText(context) {
 
+    /**
+     * Set by the chat input-bar reparent path right before the bar is moved between its two homes
+     * (list footer ↔ floating overlay). When true, focus is restored once the view is re-attached,
+     * so the move doesn't leave the keyboard dead.
+     */
+    var restoreFocusAfterReparent = false
+
+    /** Whether this field held focus at the moment it was detached (see [onDetachedFromWindow]). */
+    private var hadFocusAtDetach = false
+
+    /**
+     * Never stay focused while detached from the window.
+     *
+     * The chat input bar is reparented (removed and re-added) whenever it moves between the list
+     * footer and the floating overlay. If the bar's EditText owns focus at that moment, the window
+     * is left holding a focused view that is no longer a descendant of the view tree, and the next
+     * frame's `ViewRootImpl.draw()` → `scrollToRectOrFocus()` throws
+     * `IllegalArgumentException: parameter must be a descendant of this view` (from
+     * `ViewGroup.offsetDescendantRectToMyCoords`). Dropping focus here is the one place that holds
+     * the invariant for EVERY reparent path, including ones added later.
+     */
+    override fun onDetachedFromWindow() {
+        hadFocusAtDetach = hasFocus()
+        super.onDetachedFromWindow()
+        if (hadFocusAtDetach) clearFocus()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (!hadFocusAtDetach) return
+        hadFocusAtDetach = false
+        if (!restoreFocusAfterReparent) return
+        restoreFocusAfterReparent = false
+        // After the (re)attach pass: only restore into a live, visible window; a teardown simply
+        // drops the pending restore.
+        post {
+            runCatching {
+                if (isAttachedToWindow && isShown && !hasFocus()) {
+                    isFocusableInTouchMode = true
+                    requestFocus()
+                }
+            }
+        }
+    }
+
+
     /** IME rich-content commit (Gboard GIF/sticker picker) — an image was inserted via the keyboard. */
     var onImageUri: ((Uri) -> Unit)? = null
 

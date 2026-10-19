@@ -64,6 +64,10 @@ class KeepInputBarOnScroll : `WatchAIOListVB$onCreateView$7`() {
             // scrollSettledSinceOpen: never float during the initial programmatic open-scroll — the
             // overlay would detach and the input bar vanishes (see onScrollStateChanged).
             if (scrolledUp && ctrl.g != 2 && CurrentMsgList.scrollSettledSinceOpen && !isWholeMutedForSelf()) {
+                // Reparents the bar (and our ImeEditText) from footer to float — request focus
+                // restore across the move; the detach clears focus so the window can't draw with a
+                // detached focused view (see ImeEditText.onDetachedFromWindow).
+                momoi.mod.qqpro.hook.InlineInput.markReparentFocusRestore()
                 ctrl.m.onClick(recyclerView)
                 Utils.log("KeepInputBarOnScroll: float popped (state=${ctrl.g})")
             }
