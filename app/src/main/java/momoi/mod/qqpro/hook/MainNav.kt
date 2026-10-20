@@ -210,12 +210,21 @@ object MainNav {
 
             // 5. Continuous gliding crystal droplet pill
             if (pillCenterX >= 0f && pillWidth > 0f && pillHeight > 0f) {
-                val pl = pillCenterX - pillWidth / 2f
-                val pt = rect.centerY() - pillHeight / 2f
-                val pr = pillCenterX + pillWidth / 2f
-                val pb = rect.centerY() + pillHeight / 2f
+                // Clamp the pill inside the bar. pillCenterX comes from two places — the drag
+                // handler's raw touch x (which runs to the view edges, and can overshoot during a
+                // fling) and the animated tab centre — and neither is bounded by the bar's own
+                // geometry. Un-clamped, the pill's rounded cap slid past the first/last icon and
+                // read as "the bubble overflows the nav icons". Clamping the RECT (not the centre)
+                // keeps the cap inside while still letting the pill sit flush against an edge.
+                val halfW = (pillWidth / 2f).coerceAtMost(rect.width() / 2f)
+                val cx = pillCenterX.coerceIn(rect.left + halfW, rect.right - halfW)
+                val halfH = (pillHeight / 2f).coerceAtMost(rect.height() / 2f)
+                val pl = cx - halfW
+                val pt = rect.centerY() - halfH
+                val pr = cx + halfW
+                val pb = rect.centerY() + halfH
                 pillRect.set(pl, pt, pr, pb)
-                val pillR = pillHeight / 2f
+                val pillR = halfH
                 canvas.drawRoundRect(pillRect, pillR, pillR, pillPaint)
                 canvas.drawRoundRect(pillRect, pillR, pillR, pillStrokePaint)
             }

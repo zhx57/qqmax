@@ -195,14 +195,23 @@ object RichProfilePage {
             // fresh M3Button per action and forward its click to the native button's handler (or our
             // own action), instead of re-parenting the native MaterialButton. This keeps the buttons
             // visually identical.
-            val H = 40.dp
+            //
+            // Height must fit the label, not the other way round. M3Button's own metrics are
+            // typeMain (17sp) text with 13dp of vertical padding top and bottom, i.e. it needs
+            // ~43dp+ of content box; forcing the view to 40dp CLIPPED the text (the "三个按钮上的字
+            // 太大被切割" report). WRAP_CONTENT lets the button size itself from its label, and a
+            // minHeight keeps every action the same height even when one has no leading symbol.
             fun addM3Button(symbol: String, label: String, onClick: () -> Unit) {
                 val mb = M3Button(ctx).variant(M3Button.Variant.FILLED).apply {
                     text = label
                     leadingSymbol(symbol, M3.onPrimary, sizeDp = 18)
                     setOnClickListener { onClick() }
+                    // One line, and if a label ever gets too long for the width, shrink the text
+                    // instead of letting the glyphs run off the edge.
+                    isSingleLine = true
+                    ellipsize = TextUtils.TruncateAt.END
                     layoutParams = LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, H,
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                     ).apply { topMargin = 10.dp }
                 }
                 content.addView(mb)
