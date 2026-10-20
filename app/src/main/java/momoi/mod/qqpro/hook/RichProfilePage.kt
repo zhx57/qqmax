@@ -196,22 +196,29 @@ object RichProfilePage {
             // own action), instead of re-parenting the native MaterialButton. This keeps the buttons
             // visually identical.
             //
-            // Height must fit the label, not the other way round. M3Button's own metrics are
-            // typeMain (17sp) text with 13dp of vertical padding top and bottom, i.e. it needs
-            // ~43dp+ of content box; forcing the view to 40dp CLIPPED the text (the "三个按钮上的字
-            // 太大被切割" report). WRAP_CONTENT lets the button size itself from its label, and a
-            // minHeight keeps every action the same height even when one has no leading symbol.
+            // Text clipping fix — WITHOUT growing the buttons.
+            // M3Button's own metrics are 17sp label + 13dp vertical padding top and bottom, so one
+            // line needs roughly 20 + 26 = ~46dp of content box. The row height here was pinned to
+            // 40dp, so ~6dp of the glyphs was clipped (the "字太大被切割" report). Raising the height
+            // to WRAP_CONTENT would fix it but make each of the three buttons ~6dp taller — 18dp of
+            // extra column on a 502px-tall watch, which is a real cost on this screen. Instead the
+            // label is drawn at a size that FITS 40dp: 15sp (≈18dp line) + 10dp padding top/bottom
+            // = ~38dp, comfortably inside the row with the same 40dp visual weight as before.
+            val buttonHeight = 40.dp
             fun addM3Button(symbol: String, label: String, onClick: () -> Unit) {
                 val mb = M3Button(ctx).variant(M3Button.Variant.FILLED).apply {
                     text = label
-                    leadingSymbol(symbol, M3.onPrimary, sizeDp = 18)
+                    leadingSymbol(symbol, M3.onPrimary, sizeDp = 16)
                     setOnClickListener { onClick() }
-                    // One line, and if a label ever gets too long for the width, shrink the text
-                    // instead of letting the glyphs run off the edge.
+                    // Shrink the label and its insets so the text fits the fixed 40dp row.
+                    textSize = 15f
+                    setPadding(14.dp, 8.dp, 14.dp, 8.dp)
+                    minHeight = buttonHeight
                     isSingleLine = true
                     ellipsize = TextUtils.TruncateAt.END
+                    includeFontPadding = false
                     layoutParams = LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT, buttonHeight,
                     ).apply { topMargin = 10.dp }
                 }
                 content.addView(mb)
