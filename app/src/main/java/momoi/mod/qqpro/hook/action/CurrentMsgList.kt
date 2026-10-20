@@ -241,16 +241,42 @@ object CurrentMsgList {
     }
 
     private var isLoadingMsg = false
+    private var loadGuardSince = 0L
+
+    /**
+     * Ask the list for one older page.
+     *
+     * [isLoadingMsg] is a re-entrancy guard, but it has to expire. It is cleared by an observer on
+     * [msgList] — and [msgList] is REPLACED when the chat is re-opened ([Clear]), so an in-flight
+     * request's observer can stop ever firing. The flag then stayed true forever, and every later
+     * page request was silently dropped by this guard. That is a permanent "跳到第一条未读 一直报错"
+     * / "翻页没反应" state for the rest of the chat session, and it matched the reported symptom
+     * exactly on a chat with thousands of unread: the first jump interrupted by a re-open left the
+     * guard stuck and nothing worked afterwards.
+     *
+     * The guard is now also released by a timestamp: a request older than [LOAD_GUARD_MAX_MS] is
+     * considered dead and a new one is allowed through.
+     */
     private fun loadMoreMsg() {
-        if (!isLoadingMsg) {
-            msgList.observeOnce {
-                isLoadingMsg = false
-            }
-            isLoadingMsg = true
-            Utils.log("Load more msg. currentSize: ${msgList.value.size}")
-            vb.L(MsgListDataIntent.LoadTopPage("WatchAIOListVB"))
+        val now = android.os.SystemClock.uptimeMillis()
+        if (isLoadingMsg && now - loadGuardSince < LOAD_GUARD_MAX_MS) {
+            Utils.log("loadMoreMsg: skipped, a page is already in flight (${now - loadGuardSince}ms)")
+            return
         }
+        isLoadingMsg = true
+        loadGuardSince = now
+        // Observe the CURRENT instance (see above): a stale observer on a replaced list would never
+        // fire, leaving the guard to time out on every request instead of clearing promptly.
+        val current = msgList
+        current.observeOnce {
+            if (msgList === current) isLoadingMsg = false
+        }
+        Utils.log("Load more msg. currentSize: ${msgList.value.size}")
+        vb.L(MsgListDataIntent.LoadTopPage("WatchAIOListVB"))
     }
+
+    /** How long the in-flight page guard may block new requests before it is treated as dead. */
+    private const val LOAD_GUARD_MAX_MS = 20_000L
 
     /**
      * Request one page of older messages and wait specifically for the pre-page (older-history)
@@ -354,7 +380,9 @@ object CurrentMsgList {
         callback: (Int) -> Unit
     ) {
         val target = msgList.value.size - 1 - current + count
-        upwardMsgInternal(target, msgList.value.size, onProgress, onFail, callback)
+        // A jump of `count` messages can need dozens of pages (3000 unread ≈ 25+ pages), so this
+        // must behave like findMsg: retry unproductive pages instead of failing on the first one.
+        upwardMsgInternal(target, msgList.value.size, onProgress, onFail, callback, emptyPages = 0)
     }
 
     private fun upwardMsgInternal(
@@ -362,7 +390,8 @@ object CurrentMsgList {
         startSize: Int,
         onProgress: (Int) -> Unit,
         onFail: () -> Unit,
-        callback: (Int) -> Unit
+        callback: (Int) -> Unit,
+        emptyPages: Int,
     ) {
         if (msgList.value.size >= target) {
             callback(msgList.value.size - target - 1)
@@ -374,17 +403,37 @@ object CurrentMsgList {
             val pct = ((before - startSize) * 100 / (target - startSize)).coerceIn(0, 99)
             onProgress(pct)
         }
-        loadOlderPage(5000L, onResult = { reachedTop ->
+        loadOlderPage(15_000L, onResult = { reachedTop ->
             when {
                 msgList.value.size >= target -> callback(msgList.value.size - target - 1)
-                // LoadPrePageFail, or a pre-page that added nothing new -> top reached before target.
-                reachedTop || msgList.value.size <= before -> {
+                // The kernel's own end-of-history signal: genuinely can't reach the target.
+                reachedTop -> {
                     Utils.log("upwardMsg: reached top of history before target=$target, size=${msgList.value.size}")
                     onFail()
                 }
-                else -> upwardMsgInternal(target, startSize, onProgress, onFail, callback)
+                msgList.value.size > before ->
+                    upwardMsgInternal(target, startSize, onProgress, onFail, callback, emptyPages = 0)
+                emptyPages + 1 >= MAX_EMPTY_PAGES -> {
+                    Utils.log("upwardMsg: $MAX_EMPTY_PAGES empty pages, giving up target=$target")
+                    onFail()
+                }
+                else -> {
+                    // Unproductive but not the end: retry automatically (see findMsg).
+                    Utils.log("upwardMsg: empty page ${emptyPages + 1}/$MAX_EMPTY_PAGES, retrying")
+                    ThreadManager.runOnUiThread({
+                        upwardMsgInternal(target, startSize, onProgress, onFail, callback, emptyPages + 1)
+                    }, EMPTY_PAGE_RETRY_MS)
+                }
             }
-        }, onTimeout = onFail)
+        }, onTimeout = {
+            if (emptyPages + 1 >= MAX_EMPTY_PAGES) {
+                Utils.log("upwardMsg: repeated timeouts, target=$target")
+                onFail()
+            } else {
+                Utils.log("upwardMsg: page timeout ${emptyPages + 1}/$MAX_EMPTY_PAGES, retrying")
+                upwardMsgInternal(target, startSize, onProgress, onFail, callback, emptyPages + 1)
+            }
+        })
     }
 
     /**
