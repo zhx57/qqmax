@@ -859,19 +859,18 @@ object CurrentMsgList {
         matchJumpTarget(msgId, seqHint)?.let { result(it, null); return }
         if (seqHint == null && msgId <= 0L) { result(null, "这条引用缺少定位信息"); return }
 
-        val startPaging: (Long?) -> Unit = { realSeq ->
-            if (!shouldContinue()) {
-                result(null, null)
-            } else {
-                matchJumpTarget(msgId, realSeq)?.let { result(it, null) }
-                    ?: findByIdInternal(msgId, realSeq, onProgress, shouldContinue, repeatLimit, 0) { item ->
-                        result(
-                            item,
-                            if (item != null) null
-                            else if (msgId <= 0L) "无法定位消息"
-                            else "本机没有这条消息（可能已被删除或过期）"
-                        )
-                    }
+        // Local function (not a lambda val) so the early returns are plain `return`s.
+        fun startPaging(realSeq: Long?) {
+            if (!shouldContinue()) { result(null, null); return }
+            val already = matchJumpTarget(msgId, realSeq)
+            if (already != null) { result(already, null); return }
+            findByIdInternal(msgId, realSeq, onProgress, shouldContinue, repeatLimit, 0) { item ->
+                result(
+                    item,
+                    if (item != null) null
+                    else if (msgId <= 0L) "无法定位消息"
+                    else "本机没有这条消息（可能已被删除或过期）"
+                )
             }
         }
 
