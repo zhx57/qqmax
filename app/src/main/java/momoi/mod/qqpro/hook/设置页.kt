@@ -284,6 +284,14 @@ class 设置页 : SettingsActivity() {
     /**
      * Icon + accent tile colour for a top-level settings category.
      *
+     * The lookup table lives at FILE scope ([CATEGORY_ICONS]), not as a field of this @Mixin class.
+     * ApkMixin injects the class's METHODS into the target class but never its field initializers
+     * into that class's constructor, so a `private val CATEGORY_ICONS = mapOf(...)` here compiled to
+     * a field that is permanently null at runtime — and reading it crashed the settings screen with
+     * `NullPointerException: Map.get on a null object reference`. This is the documented
+     * "no fields with initial values in a @Mixin class" rule; a top-level property is a plain static
+     * on the lib side and initializes normally.
+     *
      * Keyed by the EXACT category title. The previous version matched substrings of the title
      * (`title.contains("导航")`, `contains("显示")`, …), which silently collided:
      *   • 主页导航 and 导航与滚动 both matched "导航" → identical icon;
@@ -293,33 +301,11 @@ class 设置页 : SettingsActivity() {
      * So half of the twenty categories showed a duplicate or a placeholder glyph.
      *
      * An exact map makes every category explicit, so adding a category can't silently inherit
-     * another one's icon, and each colour is distinct so the list reads as twenty separate
-     * destinations rather than a wall of identical tiles.
+     * another one's icon, and each colour is distinct so the list reads as separate destinations
+     * rather than a wall of identical tiles.
      */
     private fun categoryIconInfo(title: String): Pair<String, Int> =
         CATEGORY_ICONS[title] ?: (MaterialSymbols.settings to 0xFF_007DFF.toInt())
-
-    private val CATEGORY_ICONS: Map<String, Pair<String, Int>> = mapOf(
-        // ── 界面外观 ─────────────────────────────────────────────────────────
-        "主题配色" to (MaterialSymbols.palette to 0xFF_2979FF.toInt()),
-        "MIUIX 风格" to (MaterialSymbols.star to 0xFF_7C4DFF.toInt()),
-        "主页导航" to (MaterialSymbols.arrow_downward to 0xFF_26A69A.toInt()),
-        "聊天显示" to (MaterialSymbols.text_fields to 0xFF_00C853.toInt()),
-        // ── 聊天 ─────────────────────────────────────────────────────────────
-        "输入与发送" to (MaterialSymbols.edit to 0xFF_FFAB00.toInt()),
-        "消息与头像" to (MaterialSymbols.account_circle to 0xFF_0091EA.toInt()),
-        "标题栏与未读" to (MaterialSymbols.push_pin to 0xFF_FF6D00.toInt()),
-        "聊天增强" to (MaterialSymbols.summarize to 0xFF_5E35B1.toInt()),
-        // ── 联系人与空间 ─────────────────────────────────────────────────────
-        "联系人与在线状态" to (MaterialSymbols.person to 0xFF_43A047.toInt()),
-        "QQ 空间" to (MaterialSymbols.interests to 0xFF_FDD835.toInt()),
-        // ── 媒体与通知 ───────────────────────────────────────────────────────
-        "相机与相册" to (MaterialSymbols.photo_camera to 0xFF_EF6C00.toInt()),
-        "通知与通话" to (MaterialSymbols.notifications to 0xFF_E53935.toInt()),
-        // ── 系统与操作 ───────────────────────────────────────────────────────
-        "操作与手势" to (MaterialSymbols.tune to 0xFF_546E7A.toInt()),
-        "关于与更新" to (MaterialSymbols.info to 0xFF_5C6BC0.toInt()),
-    )
 
     /**
      * Open a category as a detail layer overlaid on the (still-present) level-1 list: its own
@@ -1422,3 +1408,39 @@ class 设置页 : SettingsActivity() {
 }
 
 private typealias GroupScopeFix = momoi.mod.qqpro.lib.LinearScope
+
+/**
+ * Category title → (Material Symbol, accent colour) for the top-level settings list.
+ *
+ * FILE-scope on purpose: it is read from a @Mixin class, and ApkMixin injects a hook class's
+ * METHODS but never its field initializers into the target's constructor. A `private val` inside
+ * the @Mixin therefore stayed null at runtime and crashed the settings screen
+ * (`NullPointerException: Map.get on a null object reference`). A top-level property compiles to a
+ * static on the lib side and initializes normally.
+ *
+ * Keyed by the EXACT title (not `contains`) so two categories can't silently collide on one icon
+ * and a new category can't inherit an unrelated one's glyph by accident. Every entry has a distinct
+ * symbol and a distinct colour.
+ */
+private val CATEGORY_ICONS: Map<String, Pair<String, Int>> = mapOf(
+    // ── 界面外观 ─────────────────────────────────────────────────────────
+    "主题配色" to (MaterialSymbols.palette to 0xFF_2979FF.toInt()),
+    "MIUIX 风格" to (MaterialSymbols.star to 0xFF_7C4DFF.toInt()),
+    "主页导航" to (MaterialSymbols.arrow_downward to 0xFF_26A69A.toInt()),
+    "聊天显示" to (MaterialSymbols.text_fields to 0xFF_00C853.toInt()),
+    // ── 聊天 ─────────────────────────────────────────────────────────────
+    "输入与发送" to (MaterialSymbols.edit to 0xFF_FFAB00.toInt()),
+    "消息与头像" to (MaterialSymbols.account_circle to 0xFF_0091EA.toInt()),
+    "标题栏与未读" to (MaterialSymbols.push_pin to 0xFF_FF6D00.toInt()),
+    "聊天增强" to (MaterialSymbols.summarize to 0xFF_5E35B1.toInt()),
+    // ── 联系人与空间 ─────────────────────────────────────────────────────
+    "联系人与在线状态" to (MaterialSymbols.person to 0xFF_43A047.toInt()),
+    "QQ 空间" to (MaterialSymbols.interests to 0xFF_FDD835.toInt()),
+    // ── 媒体与通知 ───────────────────────────────────────────────────────
+    "相机与相册" to (MaterialSymbols.photo_camera to 0xFF_EF6C00.toInt()),
+    "通知与通话" to (MaterialSymbols.notifications to 0xFF_E53935.toInt()),
+    // ── 系统与操作 ───────────────────────────────────────────────────────
+    "操作与手势" to (MaterialSymbols.tune to 0xFF_546E7A.toInt()),
+    "关于与更新" to (MaterialSymbols.info to 0xFF_5C6BC0.toInt()),
+)
+
