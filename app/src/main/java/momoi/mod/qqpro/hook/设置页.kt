@@ -181,15 +181,28 @@ class 设置页 : SettingsActivity() {
                 .padding(left = 4.dp, top = 0.dp, right = 4.dp, bottom = 12.dp)
 
             // Grouped Categories in MIUIX Cards
+            //
+            // Groups mirror the mental model, not the module layout: how the app LOOKS → how CHAT
+            // behaves → people & feeds → media & alerts → system & gestures. Every category in
+            // buildCategories() appears in exactly one group (checked by the `rendered` guard below,
+            // which logs a category that no group claims instead of silently dropping it).
             val categories = buildCategories()
             val groups = listOf(
-                "个性与界面" to categories.filter { it.title in listOf("外观主题", "MIUIX 风格", "菜单自定义") },
-                "聊天与会话" to categories.filter { it.title in listOf("聊天输入", "聊天显示", "群聊头像", "标题栏与未读", "聊天总结", "聊天截图", "翻译") },
-                "主页导航" to categories.filter { it.title in listOf("主页导航", "导航与滚动") },
-                "联系人与空间" to categories.filter { it.title in listOf("联系人", "在线状态") },
-                "通知与系统" to categories.filter { it.title in listOf("通知与提醒", "通话", "相机与媒体", "链接") },
-                "扩展" to categories.filter { it.title in listOf("关于与更新", "调试") }
-            )
+                "界面外观" to listOf("主题配色", "MIUIX 风格", "主页导航", "聊天显示"),
+                "聊天" to listOf("输入与发送", "消息与头像", "标题栏与未读", "聊天增强"),
+                "联系人与空间" to listOf("联系人与在线状态", "QQ 空间"),
+                "媒体与通知" to listOf("相机与相册", "通知与通话"),
+                "系统与操作" to listOf("操作与手势", "关于与更新"),
+            ).map { (title, names) -> title to categories.filter { it.title in names } }
+
+            // Safety net: a category added to buildCategories() but not listed above would vanish
+            // from the UI entirely. Surface that loudly instead of shipping an invisible screen.
+            runCatching {
+                val shown = groups.flatMap { it.second }.map { it.title }.toSet()
+                categories.filterNot { it.title in shown }.forEach {
+                    Utils.log("设置页: category '${it.title}' is not assigned to any group and is unreachable")
+                }
+            }
 
             for ((groupTitle, list) in groups) {
                 if (list.isEmpty()) continue
@@ -287,32 +300,25 @@ class 设置页 : SettingsActivity() {
         CATEGORY_ICONS[title] ?: (MaterialSymbols.settings to 0xFF_007DFF.toInt())
 
     private val CATEGORY_ICONS: Map<String, Pair<String, Int>> = mapOf(
-        // ── appearance / style ────────────────────────────────────────────────
-        "外观主题" to (MaterialSymbols.palette to 0xFF_2979FF.toInt()),
+        // ── 界面外观 ─────────────────────────────────────────────────────────
+        "主题配色" to (MaterialSymbols.palette to 0xFF_2979FF.toInt()),
         "MIUIX 风格" to (MaterialSymbols.star to 0xFF_7C4DFF.toInt()),
-        "菜单自定义" to (MaterialSymbols.drag_handle to 0xFF_00BFA5.toInt()),
-        // ── chat ─────────────────────────────────────────────────────────────
-        "聊天输入" to (MaterialSymbols.edit to 0xFF_FFAB00.toInt()),
-        "聊天显示" to (MaterialSymbols.text_fields to 0xFF_00C853.toInt()),
-        "群聊头像" to (MaterialSymbols.account_circle to 0xFF_0091EA.toInt()),
-        "标题栏与未读" to (MaterialSymbols.push_pin to 0xFF_FF6D00.toInt()),
-        "聊天截图" to (MaterialSymbols.image to 0xFF_8D6E63.toInt()),
-        "聊天总结" to (MaterialSymbols.summarize to 0xFF_5E35B1.toInt()),
-        "翻译" to (MaterialSymbols.translate to 0xFF_00897B.toInt()),
-        // ── navigation ───────────────────────────────────────────────────────
         "主页导航" to (MaterialSymbols.arrow_downward to 0xFF_26A69A.toInt()),
-        "导航与滚动" to (MaterialSymbols.tune to 0xFF_546E7A.toInt()),
-        // ── people / calls ───────────────────────────────────────────────────
-        "联系人" to (MaterialSymbols.person to 0xFF_43A047.toInt()),
-        "在线状态" to (MaterialSymbols.verified_user to 0xFF_388E3C.toInt()),
-        "通话" to (MaterialSymbols.call to 0xFF_2E7D32.toInt()),
-        // ── media / misc ─────────────────────────────────────────────────────
-        "相机与媒体" to (MaterialSymbols.photo_camera to 0xFF_EF6C00.toInt()),
-        "链接" to (MaterialSymbols.interests to 0xFF_0288D1.toInt()),
-        // ── system ───────────────────────────────────────────────────────────
-        "通知与提醒" to (MaterialSymbols.notifications to 0xFF_E53935.toInt()),
+        "聊天显示" to (MaterialSymbols.text_fields to 0xFF_00C853.toInt()),
+        // ── 聊天 ─────────────────────────────────────────────────────────────
+        "输入与发送" to (MaterialSymbols.edit to 0xFF_FFAB00.toInt()),
+        "消息与头像" to (MaterialSymbols.account_circle to 0xFF_0091EA.toInt()),
+        "标题栏与未读" to (MaterialSymbols.push_pin to 0xFF_FF6D00.toInt()),
+        "聊天增强" to (MaterialSymbols.summarize to 0xFF_5E35B1.toInt()),
+        // ── 联系人与空间 ─────────────────────────────────────────────────────
+        "联系人与在线状态" to (MaterialSymbols.person to 0xFF_43A047.toInt()),
+        "QQ 空间" to (MaterialSymbols.interests to 0xFF_FDD835.toInt()),
+        // ── 媒体与通知 ───────────────────────────────────────────────────────
+        "相机与相册" to (MaterialSymbols.photo_camera to 0xFF_EF6C00.toInt()),
+        "通知与通话" to (MaterialSymbols.notifications to 0xFF_E53935.toInt()),
+        // ── 系统与操作 ───────────────────────────────────────────────────────
+        "操作与手势" to (MaterialSymbols.tune to 0xFF_546E7A.toInt()),
         "关于与更新" to (MaterialSymbols.info to 0xFF_5C6BC0.toInt()),
-        "调试" to (MaterialSymbols.settings to 0xFF_78909C.toInt()),
     )
 
     /**
@@ -413,8 +419,33 @@ class 设置页 : SettingsActivity() {
     }
 
     /** The full settings tree, grouped into categories for the two-level navigation. */
+    /**
+     * The full settings tree, grouped into categories for the two-level navigation.
+     *
+     * Organised by WHERE A USER WOULD LOOK FOR A THING, not by which module implements it. The
+     * previous layout had grown by accretion and mixed those two axes, which produced a list nobody
+     * could navigate:
+     *
+     *   • 联系人 held four QZone switches (动态顶栏 / 单视频内联 / 小程序卡片 / 正文折叠 / 多图折叠) —
+     *     nothing about contacts;
+     *   • 菜单自定义 held 多选按时间排序 / 多选复制含发送者 — multi-select behaviour, not menus;
+     *   • 聊天输入 held 消息防撤回, 全员禁言 ×2 and 屏幕圆角直径 — a chat behaviour and a layout
+     *     adaptation, not input;
+     *   • 导航与滚动 held 回复跳转加载全部 and 显示系统状态栏 — neither is navigation or scrolling;
+     *   • 聊天输入 alone had 18 rows while 外观主题 / 关于与更新 / 聊天总结 had one each, so some
+     *     categories needed long scrolling while others were a single toggle behind their own tap;
+     *   • 链接 / 翻译 / 聊天截图 / 聊天总结 were four separate top-level categories that are all
+     *     "聊天增强" — four taps to reach four related groups of switches.
+     *
+     * Now: fourteen categories across six groups, each one a place a user would actually think of.
+     * Chat-enhancement features are together, QZone has its own home, multi-select sits with the
+     * other interaction settings, and no category is a single lonely toggle.
+     */
     private fun buildCategories(): List<SettingsCategory> = listOf(
-        SettingsCategory("外观主题", "MIUIX 配色与色彩系统") {
+        // ══════════════════════════════════════════════════════════════════════════════════════
+        // 界面外观
+        // ══════════════════════════════════════════════════════════════════════════════════════
+        SettingsCategory("主题配色", "明暗基调、主题色与系统显示") {
             val note = "重进页面生效"
             selector("外观模式", "MIUIX 配色的明暗基调；深色采用纯黑 OLED 沉浸，浅色采用澎湃冷灰基线，$note",
                 listOf("深色", "浅色"),
@@ -444,6 +475,9 @@ class 设置页 : SettingsActivity() {
                 Utils.toast(this@设置页, "已恢复默认配色，重进页面生效")
                 showCategoryList()
             }
+            // Display-level system chrome: where it belongs (how the app looks), not with navigation.
+            section("系统显示", "状态栏与屏幕适配")
+            switch("显示系统状态栏", "显示系统状态栏(时间/电量)，内容自动下移避让(适配安卓15+全面屏)；关闭则全屏隐藏状态栏。切换后需重启应用生效", Settings.showStatusBar)
         },
         SettingsCategory("MIUIX 风格", "MIUIX 视觉重构总开关（关闭则保留原生界面）") {
             switch("MIUIX 聊天界面", "聊天输入框、回复/编辑横幅应用 MIUIX 风格(大圆角胶囊输入框、纯白滑块开关、澎湃科技蓝发送键)；关闭则保留原样。需开启“聊天页直接输入”，重进聊天页生效", Settings.materializeChat)
@@ -457,34 +491,57 @@ class 设置页 : SettingsActivity() {
             switch("MIUIX 设置页面", "把自我页(主页第4页)、好友/群聊设置页重绘为全新 MIUIX 风格(头部大圆角卡片+分组列表+澎湃蓝开关)，并把改群名/备注/昵称改为 MIUIX 输入弹窗(重进对应页面生效)", Settings.useM3Settings)
             switch("MIUIX 登录页", "把扫码登录页重绘为全新 MIUIX 风格(大圆角加框二维码、澎湃科技蓝状态提示、扫码确认后显示登录账号头像与号码、刷新/手机号登录按钮)，并跳过首次启动的隐私协议确认页(下次登录生效)", Settings.materializeLogin)
         },
-        SettingsCategory("菜单自定义", "长按菜单与附件菜单的排序与显示") {
-            section("自定义菜单", "拖动左侧手柄排序；拖到分隔线下方的项目将不再显示。例如可隐藏“翻译/截图/总结/多选”等。")
-            actionCard("长按消息菜单", "排序/显示 回复·复制·撤回·转发·翻译·截图·总结·多选·删除 等") {
-                startActivity(Intent(this@设置页, MenuEditorActivity::class.java)
-                    .putExtra(MenuEditorActivity.EXTRA_MENU, MenuEditorActivity.MENU_LONGPRESS))
-            }
-            actionCard("附件「+」菜单", "排序/显示 表情·贴纸·艾特·相册·拍照·录像·音频·通话 等") {
-                startActivity(Intent(this@设置页, MenuEditorActivity::class.java)
-                    .putExtra(MenuEditorActivity.EXTRA_MENU, MenuEditorActivity.MENU_ATTACHMENT))
-            }
-            switch("多选按时间排序", "多选转发/截图等批量操作时，选中消息按聊天时间顺序处理；关闭则按点选先后顺序", Settings.multiSelectTimeOrder)
-            switch("多选复制含发送者", "多选复制/部分复制时，每条消息前加上发送者名字(“名字：内容”)", Settings.multiSelectCopySender)
+        SettingsCategory("主页导航", "主页底部翻页导航栏") {
+            switch("自定义导航栏", "用重绘的导航栏替换原生翻页指示器；关闭则保留原生样式，以下选项不生效", Settings.mainNavCustom)
+            switch("导航在底部", "主页(会话列表)翻页导航移到屏幕底部", Settings.bottomMainNav)
+            switch("文字标签导航", "手机风格底部导航：图标下方显示页面名称(消息/联系人/动态/我)，适合在手机上使用。图标大小与文字均随“导航高度”缩放，开启后显示所有页面图标", Settings.mainNavLabels)
+            slider("导航高度", "主页导航图标/栏高度(dp)，默认 16；文字标签导航开启时同样控制图标与文字大小", Settings.mainNavHeight, min = 12f, max = 64f)
+            switch("方形铺开", "导航图标在整行均匀铺开，而非聚在中间", Settings.mainNavSquare)
+            switch("显示所有页面图标", "每个页面都显示图标，当前页蓝色高亮；关闭则只显示当前页图标、其余为圆点", Settings.mainNavAllIcons)
+            switch("显示未读数", "在导航各页面图标上显示未读数红标(设置页除外)：消息页为总未读，联系人页为好友+群通知数", Settings.mainNavUnread)
+            switch("点击当前页跳转未读", "已在某页时再次点击该页图标：消息页把下一条未读会话滚到顶部(循环)，联系人/动态页打开通知页面。需开启“显示未读数”", Settings.mainNavUnreadJump)
+            switch("滚动时自动收起", "列表向下滑动浏览时导航栏自动向下收起隐藏，反方向向上滑动时立即恢复出现", Settings.mainNavAutoHide)
         },
-        SettingsCategory("聊天输入", "输入框、发送方式与表情") {
-            switch("消息防撤回", "阻止对方撤回消息并保留消息内容，撤回时在消息上标记已撤回", Settings.antiRecall)
+        SettingsCategory("聊天显示", "缩放、气泡、图片、背景与屏幕适配") {
+            slider("缩放倍数", "整体界面缩放，返回聊天页即时生效", Settings.scale)
+            slider("聊天文本缩放", "聊天气泡内文字大小", Settings.chatScale)
+            slider("图片最大高度", "聊天图片最大显示高度(占屏幕高度比例)，默认 0.5", Settings.picMaxHeightRatio, min = 0.3f, max = 1f)
+            switch("长截图支持", "查看大图时，若图片高度≥屏幕2倍(长截图)，默认按屏幕宽度铺满并定位到顶部，可上下滚动阅读；双击循环缩放：1档整图高度·2档铺满宽度·3档进一步放大", Settings.longScreenshot)
+            slider("气泡圆角半径", "聊天气泡、合并转发/聊天记录块与回复块的圆角半径(dp)", Settings.bubbleCornerRadius, min = 0f, max = 24f)
+            colorPicker("我的气泡颜色", "留空为材料色", Settings.bubbleColorSelf, MaterialColors.ACCENT,
+                { M3.parseColorOrNull(Settings.bubbleColorSelf.value) ?: M3.primary })
+            colorPicker("对方气泡颜色", "留空为材料色", Settings.bubbleColorOther, MaterialColors.SURFACE + MaterialColors.ACCENT,
+                { M3.parseColorOrNull(Settings.bubbleColorOther.value) ?: M3.surfaceContainer })
+            colorPicker("我的文字颜色", "留空为自动对比我的气泡色", Settings.textColorSelf, MaterialColors.ON,
+                { M3.parseColorOrNull(Settings.textColorSelf.value) ?: M3.onColor(BubbleCorner.resolvedBubbleColor(1)) })
+            colorPicker("对方文字颜色", "留空为自动对比对方气泡色", Settings.textColor, MaterialColors.ON,
+                { M3.parseColorOrNull(Settings.textColor.value) ?: M3.onColor(BubbleCorner.resolvedBubbleColor(0)) })
+            chatBackgroundPicker()
+            slider("背景变暗程度", "调暗背景图以便看清文字，重进聊天页生效", Settings.chatBgDarken, min = 0f, max = 0.9f)
+            // Screen-fit tuning belongs with the other chat-layout knobs, not with the input box.
+            section("屏幕适配", "圆屏裁切避让")
+            slider("屏幕圆角直径", "在输入框左右各留出此宽度的空白，避免圆屏圆角裁切两侧按钮", Settings.screenCornerDiameter, min = 0f, max = 48f)
+        },
+
+        // ══════════════════════════════════════════════════════════════════════════════════════
+        // 聊天
+        // ══════════════════════════════════════════════════════════════════════════════════════
+        SettingsCategory("输入与发送", "输入框形态、表情与发送行为") {
+            section("输入框", "聊天页的输入方式")
             switch("聊天页直接输入", "在聊天页用输入框替换键盘键，有文字时麦克风键变发送键", Settings.inlineChatInput)
             switch("完全行内输入", "彻底不打开输入法页面：@、图片、回复、编辑、语音转文字都在输入框内完成。@xxx 与 [图片] 整体删除，回复/编辑在输入框上方显示横幅可点击取消(需开启“聊天页直接输入”)", Settings.fullInlineInput)
-            switch("行内发送按钮", "输入页将发送键移到输入框右侧，左侧加关闭键取消发送", Settings.inlineSendButton)
-            switch("行内表情按钮", "聊天页输入有文字时左侧显示表情键，点击收起键盘弹出表情选择器插入表情，点输入框恢复键盘", Settings.inlineEmojiButton)
-            switch("记住输入草稿", "分会话记住未发送的输入框内容(文字、@、图片、回复目标)，离开聊天再返回时自动恢复，发送后清除(需开启“完全行内输入”)", Settings.rememberDraft)
-            switch("表情选择器插入输入框", "从系统表情选择器选择表情/图片/GIF 时不立即发送，而是作为 [表情]/[图片] 插入输入框，可继续编辑一起发送(需开启“完全行内输入”)", Settings.emojiPickerToInput)
-            switch("附件浮层", "用输入框左侧 + 键打开附件浮层，移除附件翻页；表情移入附件列表(重进聊天页生效)", Settings.attachmentOverlay)
             switch("单行输入", "输入框固定为单行显示", Settings.singleLineInput)
-            switch("滚动时保持输入栏", "向上翻看历史消息时保持底部输入栏(及输入框)显示；关闭(默认)则像原生一样滚动时收起为上箭头(重进聊天页生效)", Settings.keepInputBarOnScroll)
             switch("输入键居中", "在聊天页面将输入键居中放置", Settings.swapCenterKeyboard)
             switch("隐藏语音按钮", "在聊天页隐藏语音(麦克风)按钮，所有输入模式下均生效", Settings.hideVoiceButton)
-            switch("全员禁言隐藏输入栏", "群全员禁言且自己非群主/管理员时，隐藏底部输入栏，改为显示“全员禁言中”提示", Settings.muteHideInputBar)
-            switch("群全员禁言开关", "在群聊设置中为群主/管理员显示「全员禁言」开关，可查看并切换当前禁言状态（需开启「MIUIX 设置页面」）", Settings.groupWholeMute)
+            textInput("语音键文字", "聊天页语音键上显示的文字", Settings.voiceBtnText)
+            switch("滚动时保持输入栏", "向上翻看历史消息时保持底部输入栏(及输入框)显示；关闭(默认)则像原生一样滚动时收起为上箭头(重进聊天页生效)", Settings.keepInputBarOnScroll)
+            section("表情与附件", "表情面板与附件菜单")
+            switch("行内表情按钮", "聊天页输入有文字时左侧显示表情键，点击收起键盘弹出表情选择器插入表情，点输入框恢复键盘", Settings.inlineEmojiButton)
+            switch("表情选择器插入输入框", "从系统表情选择器选择表情/图片/GIF 时不立即发送，而是作为 [表情]/[图片] 插入输入框，可继续编辑一起发送(需开启“完全行内输入”)", Settings.emojiPickerToInput)
+            switch("附件浮层", "用输入框左侧 + 键打开附件浮层，移除附件翻页；表情移入附件列表(重进聊天页生效)", Settings.attachmentOverlay)
+            section("发送行为", "发送键与草稿")
+            switch("行内发送按钮", "输入页将发送键移到输入框右侧，左侧加关闭键取消发送", Settings.inlineSendButton)
+            switch("记住输入草稿", "分会话记住未发送的输入框内容(文字、@、图片、回复目标)，离开聊天再返回时自动恢复，发送后清除(需开启“完全行内输入”)", Settings.rememberDraft)
             switch("图片随消息发送", "发送文字时一并发送已选图片", Settings.sendWithImage)
             switch("回复带艾特", "回复消息时自动艾特对方", Settings.replyWithAt)
             switch("气泡 +1 按钮", "最新一条与上一条内容相同时，在气泡上显示「+1」小按钮，点按可再次发送该内容；关闭则不显示", Settings.plusOneButton)
@@ -501,27 +558,13 @@ class 设置页 : SettingsActivity() {
                 Settings.doubleSpeak.value = which == 2
                 Settings.doubleReply.value = which == 1
             }
-            slider("屏幕圆角直径", "在输入框左右各留出此宽度的空白，避免圆屏圆角裁切两侧按钮", Settings.screenCornerDiameter, min = 0f, max = 48f)
-            textInput("语音键文字", "聊天页语音键上显示的文字", Settings.voiceBtnText)
         },
-        SettingsCategory("聊天显示", "缩放、气泡、图片与背景") {
-            slider("缩放倍数", "整体界面缩放，返回聊天页即时生效", Settings.scale)
-            slider("聊天文本缩放", "聊天气泡内文字大小", Settings.chatScale)
-            slider("图片最大高度", "聊天图片最大显示高度(占屏幕高度比例)，默认 0.5", Settings.picMaxHeightRatio, min = 0.3f, max = 1f)
-            switch("长截图支持", "查看大图时，若图片高度≥屏幕2倍(长截图)，默认按屏幕宽度铺满并定位到顶部，可上下滚动阅读；双击循环缩放：1档整图高度·2档铺满宽度·3档进一步放大", Settings.longScreenshot)
-            slider("气泡圆角半径", "聊天气泡、合并转发/聊天记录块与回复块的圆角半径(dp)", Settings.bubbleCornerRadius, min = 0f, max = 24f)
-            colorPicker("我的气泡颜色", "留空为材料色", Settings.bubbleColorSelf, MaterialColors.ACCENT,
-                { M3.parseColorOrNull(Settings.bubbleColorSelf.value) ?: M3.primary })
-            colorPicker("对方气泡颜色", "留空为材料色", Settings.bubbleColorOther, MaterialColors.SURFACE + MaterialColors.ACCENT,
-                { M3.parseColorOrNull(Settings.bubbleColorOther.value) ?: M3.surfaceContainer })
-            colorPicker("我的文字颜色", "留空为自动对比我的气泡色", Settings.textColorSelf, MaterialColors.ON,
-                { M3.parseColorOrNull(Settings.textColorSelf.value) ?: M3.onColor(BubbleCorner.resolvedBubbleColor(1)) })
-            colorPicker("对方文字颜色", "留空为自动对比对方气泡色", Settings.textColor, MaterialColors.ON,
-                { M3.parseColorOrNull(Settings.textColor.value) ?: M3.onColor(BubbleCorner.resolvedBubbleColor(0)) })
-            chatBackgroundPicker()
-            slider("背景变暗程度", "调暗背景图以便看清文字，重进聊天页生效", Settings.chatBgDarken, min = 0f, max = 0.9f)
-        },
-        SettingsCategory("群聊头像", "群聊中的头像与昵称") {
+        SettingsCategory("消息与头像", "消息行为、撤回与群聊头像昵称") {
+            section("消息行为", "撤回与群内限制")
+            switch("消息防撤回", "阻止对方撤回消息并保留消息内容，撤回时在消息上标记已撤回", Settings.antiRecall)
+            switch("全员禁言隐藏输入栏", "群全员禁言且自己非群主/管理员时，隐藏底部输入栏，改为显示“全员禁言中”提示", Settings.muteHideInputBar)
+            switch("群全员禁言开关", "在群聊设置中为群主/管理员显示「全员禁言」开关，可查看并切换当前禁言状态（需开启「MIUIX 设置页面」）", Settings.groupWholeMute)
+            section("群聊头像与昵称", "群消息里的发送者显示")
             switch("群聊显示头像", "在群聊消息中显示用户头像和两行昵称", Settings.showGroupAvatar)
             switch("自己也显示头像", "自己的消息也显示头像和两行昵称，与他人一致", Settings.showSelfAvatar)
             slider("头像大小", "群聊头像大小(相对昵称文字的倍数)，默认 2.5", Settings.avatarSizeScale, min = 1.5f, max = 6f)
@@ -532,7 +575,7 @@ class 设置页 : SettingsActivity() {
                 Utils.toast(this@设置页, "已清除 $n 个头像缓存")
             }
         },
-        SettingsCategory("标题栏与未读", "聊天顶部标题栏") {
+        SettingsCategory("标题栏与未读", "聊天顶部标题栏与未读提示") {
             switch("富标题栏", "聊天顶部显示返回键、其它会话未读数、群成员数与群名(重进聊天页生效)", Settings.enableTitlebar)
             switch("仅聊天页显示标题栏", "标题栏作为浮层叠在聊天列表上方，翻到聊天设置页时自动隐藏；关闭则叠在所有页之上(重进聊天页生效)", Settings.titlebarChatOnly)
             switch("标题栏显示未读数", "在富标题栏显示其它会话的未读数红标(重进聊天页生效)", Settings.titlebarShowUnread)
@@ -544,36 +587,83 @@ class 设置页 : SettingsActivity() {
             slider("标题栏高度", "富标题栏高度(dp)，默认 16", Settings.titlebarHeight, min = 16f, max = 32f)
             slider("标题栏左右边距", "富标题栏与未读红标左右留出的空白(dp)，避免圆屏圆角裁切", Settings.titlebarSideMargin, min = 0f, max = 48f)
         },
-        SettingsCategory("主页导航", "主页底部翻页导航栏") {
-            switch("自定义导航栏", "用重绘的导航栏替换原生翻页指示器；关闭则保留原生样式，以下选项不生效", Settings.mainNavCustom)
-            switch("导航在底部", "主页(会话列表)翻页导航移到屏幕底部", Settings.bottomMainNav)
-            switch("文字标签导航", "手机风格底部导航：图标下方显示页面名称(消息/联系人/动态/我)，适合在手机上使用。图标大小与文字均随“导航高度”缩放，开启后显示所有页面图标", Settings.mainNavLabels)
-            slider("导航高度", "主页导航图标/栏高度(dp)，默认 16；文字标签导航开启时同样控制图标与文字大小", Settings.mainNavHeight, min = 12f, max = 64f)
-            switch("方形铺开", "导航图标在整行均匀铺开，而非聚在中间", Settings.mainNavSquare)
-            switch("显示所有页面图标", "每个页面都显示图标，当前页蓝色高亮；关闭则只显示当前页图标、其余为圆点", Settings.mainNavAllIcons)
-            switch("显示未读数", "在导航各页面图标上显示未读数红标(设置页除外)：消息页为总未读，联系人页为好友+群通知数", Settings.mainNavUnread)
-            switch("点击当前页跳转未读", "已在某页时再次点击该页图标：消息页把下一条未读会话滚到顶部(循环)，联系人/动态页打开通知页面。需开启“显示未读数”", Settings.mainNavUnreadJump)
-            switch("滚动时自动收起", "列表向下滑动浏览时导航栏自动向下收起隐藏，反方向向上滑动时立即恢复出现", Settings.mainNavAutoHide)
+        SettingsCategory("聊天增强", "链接、翻译、截图与总结") {
+            section("链接与识别", "消息里的网址、号码与 @")
+            switch("点击链接确认", "点击消息中的链接时，弹窗询问是否用浏览器打开", Settings.confirmOpenLink)
+            switch("识别无前缀链接", "同时识别不带 http(s):// 的网址，如 example.com/x", Settings.wideUrlMatch)
+            switch("识别号码", "把消息中的 6-15 位数字(QQ号/群号)变为可点击，点击可搜索好友/群", Settings.parseNumber)
+            switch("识别@成员", "群聊中把 @成员 及灰条提示中的成员名变为可点击，点击打开其资料卡(同点头像/昵称)", Settings.parseAtMember)
+            switch("高亮@我", "群聊中 @我自己 的提及用错误色高亮，使之更醒目(需开启识别@成员)", Settings.highlightSelfMention)
+            switch("链接预览", "消息含链接时尝试解析网站图标、标题与简介，显示在消息下方", Settings.enableLinkPreview)
+            colorPicker("链接颜色", "可点击链接/号码/@成员的文字颜色，留空为默认", Settings.linkColor, MaterialColors.ACCENT,
+                { M3.parseColorOrNull(Settings.linkColor.value) ?: M3.primary })
+
+            section("翻译", "消息翻译与发送翻译")
+            langSelector("查看语言", "把对方消息翻译成的目标语言", Settings.translateViewLang)
+            switch("对方消息原地替换", "翻译对方消息时直接用译文替换原文；关闭(默认)则保留原文，在其下方用分隔线显示译文", Settings.translateReplaceInPlace)
+            switch("显示“翻译全部”开关", "在好友/群聊设置页显示“翻译全部消息”开关，可逐会话开启：开启后该会话内所有可见文字消息自动翻译成查看语言(重进设置页生效)", Settings.translateShowAllSwitch)
+            switch("翻译全部时包含自己", "“翻译全部消息”开启时是否也翻译自己发送的消息；关闭(默认)只翻译对方消息(长按翻译不受影响)", Settings.translateOwnMessages)
+            switch("长按发送键翻译", "长按发送键把输入框内容翻译成发送语言(不发送)，翻译过程中输入框显示加载提示", Settings.translateSendButton)
+            langSelector("发送语言", "长按发送键时把输入内容翻译成的目标语言", Settings.translateSendLang)
+            textInput("自定义翻译接口", "留空用内置接口。URL 模板：{q}=编码后原文，{text}=原文，{to}=目标语言代码(如 zh)。返回 JSON(自动提取 translation/translatedText 等字段)或纯文本均可", Settings.customTranslateUrl)
+
+            section("聊天截图", "把选中的消息渲染成长图")
+            switch("渲染标题栏", "截图顶部显示群名/对方名标题栏(仅群名，无圆角/未读)；关闭则不渲染顶部标题", Settings.screenshotTitlebar)
+            switch("渲染输入框", "截图底部显示空输入框装饰；关闭则不渲染底部输入框", Settings.screenshotInputBar)
+            switch("自己显示在左侧", "把自己发送的消息也渲染在左侧(第三方视角)；默认关闭(自己在右)", Settings.screenshotSelfAsOther)
+            switch("显示昵称与头像", "截图中显示真实昵称与头像；关闭则匿名化为 A/B/C 与随机色字母头像", Settings.screenshotShowIdentity)
+            switch("生成水印", "在截图底部添加“由 QQ Max 生成”水印", Settings.screenshotWatermark)
+
+            section("聊天总结", "用 AI 总结聊天记录")
+            switch("总结未读消息", "未读超过 20 条时，在“↑X条新消息”气泡下方显示“总结未读”按钮，从第一条未读总结到末尾", Settings.summarizeUnreadButton)
+            selector("总结风格", "要点(Markdown列表)/一句话/详细", Settings.summarizeStyle, listOf("要点", "一句话", "详细"))
+            summarizeLangSelector("总结语言", "总结输出的语言；自动=跟随会话本身的语言。过往总结记录可在好友/群聊设置页的“总结历史”查看")
+            textInput("自定义 API 地址", "接口URL，如 https://api.openai.com/v1/chat/completions，留空使用内置", Settings.customAiApiUrl)
+            textInput("自定义 API Key", "API 密钥(sk-...)，留空使用内置接口", Settings.customAiApiKey)
+            textInput("自定义模型名称", "模型ID，如 gpt-4o-mini、deepseek-chat，默认 gpt-4o-mini", Settings.customAiModel)
         },
-        SettingsCategory("导航与滚动", "翻页、返回与表冠") {
-            switch("显示系统状态栏", "显示系统状态栏(时间/电量)，内容自动下移避让(适配安卓15+全面屏)；关闭则全屏隐藏状态栏。切换后需重启应用生效", Settings.showStatusBar)
-            switch("返回先回首页", "不在首页时按返回先滑回第一页，已在首页才退出", Settings.backToFirstPage)
-            switch("回复跳转加载全部", "点击回复跳转到源消息时不限制翻页次数，一直向上加载直到找到或到达历史顶端(较旧的源消息也能定位，可能较慢)", Settings.replyFullSearch)
-            switch("屏蔽返回键", "用于把右滑当作返回的手表（如米兔）", Settings.blockBack)
-            switch("屏蔽应用内右滑返回", "关闭 QQ 应用内右滑返回上一页的手势", Settings.disableSwipeBack)
-            switch("平滑表冠滚动", "表冠滚动没有动画时开启", Settings.enableSmoothScroll)
-            slider("表冠滚动速度", "表冠滚动距离倍率，默认 1.0", Settings.encoderScrollSpeed, min = 0.3f, max = 4f)
+
+        // ══════════════════════════════════════════════════════════════════════════════════════
+        // 联系人与空间
+        // ══════════════════════════════════════════════════════════════════════════════════════
+        SettingsCategory("联系人与在线状态", "联系人页面与好友在线显示") {
+            section("联系人页", "列表与资料页")
+            switch("联系人分组", "联系人页用「好友」「群聊」标题分组，通知拆成好友/群两项各带数量，去掉群行末尾图标", Settings.contactSections)
+            switch("资料页姓名多行可复制", "好友/群资料设置页及成员资料卡的名称过长时换行显示，长按名称可复制；设置页内QQ号与昵称分两行、可分别长按复制(重进资料页生效)", Settings.profileNameMultiline)
+            section("在线状态", "好友/群成员的在线信息显示位置")
+            switch("消息列表在线圆点", "会话列表中，单聊(好友)会话的头像左上角显示彩色在线圆点(在线绿色/离线灰色)", Settings.onlineStatusMainList)
+            switch("联系人列表在线描述", "好友列表中，在每个好友名字后附上在线状态描述(如「手机在线」)", Settings.onlineStatusContactList)
+            switch("聊天标题栏在线状态", "单聊(好友)聊天页的富标题栏中，名字旁显示对方在线状态(需开启标题栏)", Settings.onlineStatusTitlebar)
+            switch("资料卡在线状态", "好友/群成员资料卡中显示在线状态描述", Settings.onlineStatusProfile)
         },
-        SettingsCategory("通知与提醒", "消息通知、声音与震动") {
+        SettingsCategory("QQ 空间", "动态页与说说显示") {
+            switch("动态顶栏按钮分散排列", "三个图标按钮平均分布到顶栏全宽(分散)；关闭则紧靠居中排列，适合圆形表盘", Settings.qzoneBarSpread)
+            switch("单视频帖子内联播放", "动态里只含一个视频的帖子，点击直接在列表内播放(再次点击暂停)，不再打开全屏播放器", Settings.qzoneInlineVideo)
+            switch("小程序卡片渲染", "动态里的小程序(轻应用)分享不再显示「请在手机QQ查看」，改为抓取分享页解析出真实的名称/图标/简介并渲染成卡片(联网)", Settings.qzoneMiniAppCard)
+            switch("动态正文折叠", "重做空间里超长的说说正文最多显示5行，点「查看全文」展开；关闭则始终显示全文", Settings.qzoneTruncatePost)
+            switch("多图折叠为两张", "重做空间里多图说说只显示两张方图，第二张变暗显示「+N」；关闭则按三列方图网格显示全部", Settings.qzoneTruncateImages)
+        },
+
+        // ══════════════════════════════════════════════════════════════════════════════════════
+        // 媒体与通知
+        // ══════════════════════════════════════════════════════════════════════════════════════
+        SettingsCategory("相机与相册", "拍照、录像与图片选择") {
+            switch("使用应用内相机", "开启后拍照/录像都用应用内相机，关闭后改用系统/第三方相机", Settings.useInAppCamera)
+            switch("相册按拍摄时间排序", "图片选择器按拍摄时间排序，关闭则按文件修改时间(默认)", Settings.gallerySortByDateTaken)
+            switch("图片/视频快速发送", "单击相册图片/视频立即发送。关闭后相册始终为多选模式，单击勾选(可只选一个)再点发送", Settings.galleryQuickSend)
+            switch("发送前预览单图", "发送单张图片时先进入预览，可选择直接发送或先编辑(旋转/翻转/裁剪/涂鸦/文字/贴纸/调整)", Settings.editSingleImageBeforeSend)
+            switch("使用系统图片选择器", "相册改用系统图片选择器/文件选择器，无需相册权限，可多选，修复部分设备问题", Settings.useSystemImagePicker)
+            switch("使用系统音频选择器", "音频文件改用系统文件选择器，关闭则用应用内音频浏览器(列出本机音频文件)", Settings.useSystemAudioPicker)
+        },
+        SettingsCategory("通知与通话", "消息提醒、来电与通话界面") {
+            section("通知与提醒", "新消息的通知、声音与震动")
             switch("允许通知", "允许显示消息通知", Settings.allowNotification)
             switch("常驻通知", "保留常驻通知（更耗电）", Settings.residentNotification)
             selector("提醒声音", "新消息提示音：关闭 / 应用内音效 / 系统通知音", Settings.notifySoundMode,
                 listOf("关闭", "应用内", "系统"))
             selector("提醒震动", "新消息震动：关闭 / 应用内模式 / 系统模式", Settings.notifyVibrateMode,
                 listOf("关闭", "应用内", "系统"))
-        },
-        SettingsCategory("通话", "语音/视频通话") {
-            section("通话", "音视频通话的通知、蓝牙与界面。部分选项重进通话生效。")
+            section("通话", "音视频通话的通知、蓝牙与界面")
             switch("来电通知修复", "确保来电有通知：QQ 只在后台且未被机型黑名单时才弹来电，且常失败。开启后由 QQ Max 自行弹出高优先级来电通知，带来电人头像/昵称与「接听/拒绝」按钮", Settings.callNotifyFix)
             switch("使用全屏来电", "来电时直接全屏拉起原生接听界面(类似电话来电)；关闭则只显示带按钮的横幅通知。需开启「来电通知修复」，并授予下方悬浮窗权限(否则安卓10+无法从后台全屏拉起)", Settings.callFullScreenIntent)
             actionCard("授予悬浮窗权限", "允许「全屏来电」在锁屏/后台直接拉起接听界面。未授予时仅显示横幅通知") {
@@ -596,67 +686,33 @@ class 设置页 : SettingsActivity() {
             switch("无摄像头也可视频通话", "没有摄像头的手表也能发起视频通话(至少看到对方)。QQ 会以「当前设备不支持」在两处拦截，开启后绕过并发起只收不发的视频通话(隐藏本地摄像头控制)", Settings.callCameralessVideo)
             switch("全新通话界面", "把来电与通话中界面重做为全新的 MIUIX 界面(内嵌原生视频画面，沿用 QQ 的通话服务/流程)；关闭则保留原生通话界面。默认关闭，重进通话生效", Settings.materializeCall)
         },
-        SettingsCategory("联系人", "联系人页面") {
-            switch("联系人分组", "联系人页用「好友」「群聊」标题分组，通知拆成好友/群两项各带数量，去掉群行末尾图标", Settings.contactSections)
-            switch("动态顶栏按钮分散排列", "三个图标按钮平均分布到顶栏全宽(分散)；关闭则紧靠居中排列，适合圆形表盘", Settings.qzoneBarSpread)
-            switch("单视频帖子内联播放", "动态里只含一个视频的帖子，点击直接在列表内播放(再次点击暂停)，不再打开全屏播放器", Settings.qzoneInlineVideo)
-            switch("小程序卡片渲染", "动态里的小程序(轻应用)分享不再显示「请在手机QQ查看」，改为抓取分享页解析出真实的名称/图标/简介并渲染成卡片(联网)", Settings.qzoneMiniAppCard)
-            switch("动态正文折叠", "重做空间里超长的说说正文最多显示5行，点「查看全文」展开；关闭则始终显示全文", Settings.qzoneTruncatePost)
-            switch("多图折叠为两张", "重做空间里多图说说只显示两张方图，第二张变暗显示「+N」；关闭则按三列方图网格显示全部", Settings.qzoneTruncateImages)
-            switch("资料页姓名多行可复制", "好友/群资料设置页及成员资料卡的名称过长时换行显示，长按名称可复制；设置页内QQ号与昵称分两行、可分别长按复制(重进资料页生效)", Settings.profileNameMultiline)
+
+        // ══════════════════════════════════════════════════════════════════════════════════════
+        // 系统与操作
+        // ══════════════════════════════════════════════════════════════════════════════════════
+        SettingsCategory("操作与手势", "返回、滚动、多选与菜单") {
+            section("返回与手势", "按键与滑动")
+            switch("返回先回首页", "不在首页时按返回先滑回第一页，已在首页才退出", Settings.backToFirstPage)
+            switch("屏蔽返回键", "用于把右滑当作返回的手表（如米兔）", Settings.blockBack)
+            switch("屏蔽应用内右滑返回", "关闭 QQ 应用内右滑返回上一页的手势", Settings.disableSwipeBack)
+            section("滚动", "表冠与列表")
+            switch("平滑表冠滚动", "表冠滚动没有动画时开启", Settings.enableSmoothScroll)
+            slider("表冠滚动速度", "表冠滚动距离倍率，默认 1.0", Settings.encoderScrollSpeed, min = 0.3f, max = 4f)
+            switch("回复跳转加载全部", "点击回复跳转到源消息时不限制翻页次数，一直向上加载直到找到或到达历史顶端(较旧的源消息也能定位，可能较慢)", Settings.replyFullSearch)
+            section("多选", "批量操作行为")
+            switch("多选按时间排序", "多选转发/截图等批量操作时，选中消息按聊天时间顺序处理；关闭则按点选先后顺序", Settings.multiSelectTimeOrder)
+            switch("多选复制含发送者", "多选复制/部分复制时，每条消息前加上发送者名字(“名字：内容”)", Settings.multiSelectCopySender)
+            section("自定义菜单", "拖动左侧手柄排序；拖到分隔线下方的项目将不再显示。例如可隐藏“翻译/截图/总结/多选”等。")
+            actionCard("长按消息菜单", "排序/显示 回复·复制·撤回·转发·翻译·截图·总结·多选·删除 等") {
+                startActivity(Intent(this@设置页, MenuEditorActivity::class.java)
+                    .putExtra(MenuEditorActivity.EXTRA_MENU, MenuEditorActivity.MENU_LONGPRESS))
+            }
+            actionCard("附件「+」菜单", "排序/显示 表情·贴纸·艾特·相册·拍照·录像·音频·通话 等") {
+                startActivity(Intent(this@设置页, MenuEditorActivity::class.java)
+                    .putExtra(MenuEditorActivity.EXTRA_MENU, MenuEditorActivity.MENU_ATTACHMENT))
+            }
         },
-        SettingsCategory("在线状态", "显示好友/群成员的在线状态") {
-            switch("消息列表在线圆点", "会话列表中，单聊(好友)会话的头像左上角显示彩色在线圆点(在线绿色/离线灰色)", Settings.onlineStatusMainList)
-            switch("联系人列表在线描述", "好友列表中，在每个好友名字后附上在线状态描述(如「手机在线」)", Settings.onlineStatusContactList)
-            switch("聊天标题栏在线状态", "单聊(好友)聊天页的富标题栏中，名字旁显示对方在线状态(需开启标题栏)", Settings.onlineStatusTitlebar)
-            switch("资料卡在线状态", "好友/群成员资料卡中显示在线状态描述", Settings.onlineStatusProfile)
-        },
-        SettingsCategory("相机与媒体", "拍照、相册与音频") {
-            switch("使用应用内相机", "开启后拍照/录像都用应用内相机，关闭后改用系统/第三方相机", Settings.useInAppCamera)
-            switch("相册按拍摄时间排序", "图片选择器按拍摄时间排序，关闭则按文件修改时间(默认)", Settings.gallerySortByDateTaken)
-            switch("图片/视频快速发送", "单击相册图片/视频立即发送。关闭后相册始终为多选模式，单击勾选(可只选一个)再点发送", Settings.galleryQuickSend)
-            switch("发送前预览单图", "发送单张图片时先进入预览，可选择直接发送或先编辑(旋转/翻转/裁剪/涂鸦/文字/贴纸/调整)", Settings.editSingleImageBeforeSend)
-            switch("使用系统图片选择器", "相册改用系统图片选择器/文件选择器，无需相册权限，可多选，修复部分设备问题", Settings.useSystemImagePicker)
-            switch("使用系统音频选择器", "音频文件改用系统文件选择器，关闭则用应用内音频浏览器(列出本机音频文件)", Settings.useSystemAudioPicker)
-        },
-        SettingsCategory("链接", "消息中的网址") {
-            switch("点击链接确认", "点击消息中的链接时，弹窗询问是否用浏览器打开", Settings.confirmOpenLink)
-            switch("识别无前缀链接", "同时识别不带 http(s):// 的网址，如 example.com/x", Settings.wideUrlMatch)
-            switch("识别号码", "把消息中的 6-15 位数字(QQ号/群号)变为可点击，点击可搜索好友/群", Settings.parseNumber)
-            switch("识别@成员", "群聊中把 @成员 及灰条提示中的成员名变为可点击，点击打开其资料卡(同点头像/昵称)", Settings.parseAtMember)
-            switch("高亮@我", "群聊中 @我自己 的提及用错误色高亮，使之更醒目(需开启识别@成员)", Settings.highlightSelfMention)
-            switch("链接预览", "消息含链接时尝试解析网站图标、标题与简介，显示在消息下方", Settings.enableLinkPreview)
-            colorPicker("链接颜色", "可点击链接/号码/@成员的文字颜色，留空为默认", Settings.linkColor, MaterialColors.ACCENT,
-                { M3.parseColorOrNull(Settings.linkColor.value) ?: M3.primary })
-        },
-        SettingsCategory("翻译", "消息翻译与发送翻译") {
-            textInput("自定义翻译接口", "留空用内置接口。URL 模板：{q}=编码后原文，{text}=原文，{to}=目标语言代码(如 zh)。返回 JSON(自动提取 translation/translatedText 等字段)或纯文本均可", Settings.customTranslateUrl)
-            langSelector("查看语言", "把对方消息翻译成的目标语言", Settings.translateViewLang)
-            switch("对方消息原地替换", "翻译对方消息时直接用译文替换原文；关闭(默认)则保留原文，在其下方用分隔线显示译文", Settings.translateReplaceInPlace)
-            switch("显示“翻译全部”开关", "在好友/群聊设置页显示“翻译全部消息”开关，可逐会话开启：开启后该会话内所有可见文字消息自动翻译成查看语言(重进设置页生效)", Settings.translateShowAllSwitch)
-            switch("翻译全部时包含自己", "“翻译全部消息”开启时是否也翻译自己发送的消息；关闭(默认)只翻译对方消息(长按翻译不受影响)", Settings.translateOwnMessages)
-            switch("长按发送键翻译", "长按发送键把输入框内容翻译成发送语言(不发送)，翻译过程中输入框显示加载提示", Settings.translateSendButton)
-            langSelector("发送语言", "长按发送键时把输入内容翻译成的目标语言", Settings.translateSendLang)
-        },
-        SettingsCategory("聊天截图", "把选中的消息渲染成长图") {
-            section("聊天截图", "在「菜单自定义 › 长按消息菜单」可显示/隐藏“截图”项。以下选项调整渲染出的长图样式。")
-            switch("渲染标题栏", "截图顶部显示群名/对方名标题栏(仅群名，无圆角/未读)；关闭则不渲染顶部标题", Settings.screenshotTitlebar)
-            switch("渲染输入框", "截图底部显示空输入框装饰；关闭则不渲染底部输入框", Settings.screenshotInputBar)
-            switch("自己显示在左侧", "把自己发送的消息也渲染在左侧(第三方视角)；默认关闭(自己在右)", Settings.screenshotSelfAsOther)
-            switch("显示昵称与头像", "截图中显示真实昵称与头像；关闭则匿名化为 A/B/C 与随机色字母头像", Settings.screenshotShowIdentity)
-            switch("生成水印", "在截图底部添加“由 QQ Max 生成”水印", Settings.screenshotWatermark)
-        },
-        SettingsCategory("聊天总结", "用 AI 总结聊天记录") {
-            section("聊天总结", "在「菜单自定义 › 长按消息菜单」可显示/隐藏“总结”项。以下选项调整总结的风格与语言。")
-            switch("总结未读消息", "未读超过 20 条时，在“↑X条新消息”气泡下方显示“总结未读”按钮，从第一条未读总结到末尾", Settings.summarizeUnreadButton)
-            selector("总结风格", "要点(Markdown列表)/一句话/详细", Settings.summarizeStyle, listOf("要点", "一句话", "详细"))
-            summarizeLangSelector("总结语言", "总结输出的语言；自动=跟随会话本身的语言。过往总结记录可在好友/群聊设置页的“总结历史”查看")
-            section("自定义 OpenAI 接口", "支持接入任何兼容 OpenAI 标准的第三方大模型 API")
-            textInput("自定义 API 地址", "接口URL，如 https://api.openai.com/v1/chat/completions，留空使用内置", Settings.customAiApiUrl)
-            textInput("自定义 API Key", "API 密钥(sk-...)，留空使用内置接口", Settings.customAiApiKey)
-            textInput("自定义模型名称", "模型ID，如 gpt-4o-mini、deepseek-chat，默认 gpt-4o-mini", Settings.customAiModel)
-        },
-        SettingsCategory("关于与更新", "版本更新") {
+        SettingsCategory("关于与更新", "版本更新、诊断与备份") {
             switch("自动检查更新", "启动时检查 QQ Max 新版本，可在关于页手动检查", Settings.autoUpdateCheck)
             actionCard("立即检查更新", "现在就检查 QQ Max 是否有新版本") {
                 OTAManager2(this@设置页).checkUpdate(true)
@@ -664,8 +720,7 @@ class 设置页 : SettingsActivity() {
             actionCard("关于", "版本信息与致谢") {
                 showAbout()
             }
-        },
-        SettingsCategory("调试", "诊断与日志") {
+            section("诊断与日志", "排查问题用")
             switch("卡死监控", "监测主线程卡死并弹出报告，崩溃捕获始终开启。手表休眠可能误报，可关闭(重启应用生效)", Settings.watchdogEnabled)
             switch("启用日志", "记录调试日志到文件用于排查问题，发行版默认关闭", Settings.enableLog)
             actionCard("保存日志到下载", "将调试日志文件保存到下载文件夹") {
@@ -680,6 +735,7 @@ class 设置页 : SettingsActivity() {
                     longDuration = true
                 )
             }
+            section("备份与恢复", "导出或导入全部设置")
             actionCard("导出设置", "将本页所有设置导出为文件保存到下载文件夹，可选 JSON 或 XML") {
                 exportSettings()
             }
