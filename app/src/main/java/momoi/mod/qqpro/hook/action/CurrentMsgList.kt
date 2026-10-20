@@ -298,16 +298,27 @@ object CurrentMsgList {
         onResult: (reachedTop: Boolean) -> Unit,
         onTimeout: () -> Unit
     ) {
+        val startedAt = android.os.SystemClock.uptimeMillis()
+        val sizeAtStart = msgList.value.size
         var settled = false
         topPageResult.observeOnce { updateType ->
             if (settled) return@observeOnce
             settled = true
+            val took = android.os.SystemClock.uptimeMillis() - startedAt
+            if (Utils.loggingEnabled) Utils.log(
+                "loadOlderPage: result updateType=$updateType after ${took}ms, " +
+                    "size $sizeAtStart -> ${msgList.value.size}"
+            )
             ThreadManager.runOnUiThread({ onResult(updateType == 5) })
         }
         ThreadManager.runOnUiThread({
             if (settled) return@runOnUiThread
             settled = true
-            Utils.log("loadOlderPage: timed out waiting for pre-page result, size=${msgList.value.size}")
+            Utils.log(
+                "loadOlderPage: TIMEOUT after ${android.os.SystemClock.uptimeMillis() - startedAt}ms " +
+                    "waiting for a pre-page result (size=$sizeAtStart, now=${msgList.value.size}) — " +
+                    "topPageResult never fired"
+            )
             onTimeout()
         }, timeoutMs)
         isLoadingMsg = false // clear any stuck guard from a previously interrupted load
@@ -595,9 +606,27 @@ object CurrentMsgList {
             // MsgListState.updateType (public int field `c`): bit 0x4 marks an older-history
             // "load previous page" result; value 5 == LoadPrePageFail (top of history reached).
             // Captured here so [loadOlderPage] waiters can correlate to the actual page load.
+            //
+            // Read via the class HIERARCHY, not getDeclaredField on the runtime class: `c` is
+            // declared on MsgListState, but `state` is typed as the MsgListUiState interface and the
+            // concrete class is only guaranteed to be *some* implementation. A declared-only lookup
+            // throws NoSuchFieldException for any subclass, which silently made updateType -1 →
+            // [topPageResult] never fired → every page load fell through to its timeout, so a jump
+            // over a few dozen pages could never finish. Also logs the raw value while logging is on,
+            // because the bit meanings below are inferred from behavior, not documentation.
             val updateType = runCatching {
-                state.javaClass.getDeclaredField("c").apply { isAccessible = true }.getInt(state)
+                var c: Class<*>? = state.javaClass
+                while (c != null) {
+                    val f = runCatching { c.getDeclaredField("c") }.getOrNull()
+                    if (f != null && f.type == Integer.TYPE) {
+                        f.isAccessible = true
+                        return@runCatching f.getInt(state)
+                    }
+                    c = c.superclass
+                }
+                -1
             }.getOrElse { -1 }
+            if (Utils.loggingEnabled) Utils.log("MsgList.n: updateType=$updateType (raw) stateCls=${state.javaClass.simpleName}")
             val list = state as LinkedList<WatchAIOMsgItem>
             // Diagnostic: capture what the kernel handed us vs our accumulated mirror, so an
             // empty RecyclerView (incoming list size 0 → blank chat) is distinguishable from a
