@@ -268,21 +268,52 @@ class 设置页 : SettingsActivity() {
         }
     }
 
-    private fun categoryIconInfo(title: String): Pair<String, Int> = when {
-        title.contains("外观") -> MaterialSymbols.palette to 0xFF_2979FF.toInt()
-        title.contains("Material") || title.contains("MIUIX") -> MaterialSymbols.star to 0xFF_7C4DFF.toInt()
-        title.contains("菜单") -> MaterialSymbols.drag_handle to 0xFF_00BFA5.toInt()
-        title.contains("输入") -> MaterialSymbols.edit to 0xFF_FFAB00.toInt()
-        title.contains("显示") -> MaterialSymbols.image to 0xFF_00C853.toInt()
-        title.contains("头像") -> MaterialSymbols.account_circle to 0xFF_0091EA.toInt()
-        title.contains("标题栏") -> MaterialSymbols.push_pin to 0xFF_FF6D00.toInt()
-        title.contains("导航") -> MaterialSymbols.arrow_downward to 0xFF_26A69A.toInt()
-        title.contains("通话") -> MaterialSymbols.call to 0xFF_43A047.toInt()
-        title.contains("空间") -> MaterialSymbols.star to 0xFF_FDD835.toInt()
-        title.contains("关于") -> MaterialSymbols.info to 0xFF_5C6BC0.toInt()
-        title.contains("调试") -> MaterialSymbols.settings to 0xFF_78909C.toInt()
-        else -> MaterialSymbols.settings to 0xFF_007DFF.toInt()
-    }
+    /**
+     * Icon + accent tile colour for a top-level settings category.
+     *
+     * Keyed by the EXACT category title. The previous version matched substrings of the title
+     * (`title.contains("导航")`, `contains("显示")`, …), which silently collided:
+     *   • 主页导航 and 导航与滚动 both matched "导航" → identical icon;
+     *   • 聊天显示 matched "显示", 群聊头像 matched "头像" — right by luck, not by intent;
+     *   • 联系人 / 在线状态 / 通知与提醒 / 相机与媒体 / 链接 / 翻译 / 聊天截图 / 聊天总结 / 菜单自定义
+     *     matched nothing at all and fell through to the same default gear.
+     * So half of the twenty categories showed a duplicate or a placeholder glyph.
+     *
+     * An exact map makes every category explicit, so adding a category can't silently inherit
+     * another one's icon, and each colour is distinct so the list reads as twenty separate
+     * destinations rather than a wall of identical tiles.
+     */
+    private fun categoryIconInfo(title: String): Pair<String, Int> =
+        CATEGORY_ICONS[title] ?: (MaterialSymbols.settings to 0xFF_007DFF.toInt())
+
+    private val CATEGORY_ICONS: Map<String, Pair<String, Int>> = mapOf(
+        // ── appearance / style ────────────────────────────────────────────────
+        "外观主题" to (MaterialSymbols.palette to 0xFF_2979FF.toInt()),
+        "MIUIX 风格" to (MaterialSymbols.star to 0xFF_7C4DFF.toInt()),
+        "菜单自定义" to (MaterialSymbols.drag_handle to 0xFF_00BFA5.toInt()),
+        // ── chat ─────────────────────────────────────────────────────────────
+        "聊天输入" to (MaterialSymbols.edit to 0xFF_FFAB00.toInt()),
+        "聊天显示" to (MaterialSymbols.text_fields to 0xFF_00C853.toInt()),
+        "群聊头像" to (MaterialSymbols.account_circle to 0xFF_0091EA.toInt()),
+        "标题栏与未读" to (MaterialSymbols.push_pin to 0xFF_FF6D00.toInt()),
+        "聊天截图" to (MaterialSymbols.image to 0xFF_8D6E63.toInt()),
+        "聊天总结" to (MaterialSymbols.summarize to 0xFF_5E35B1.toInt()),
+        "翻译" to (MaterialSymbols.translate to 0xFF_00897B.toInt()),
+        // ── navigation ───────────────────────────────────────────────────────
+        "主页导航" to (MaterialSymbols.arrow_downward to 0xFF_26A69A.toInt()),
+        "导航与滚动" to (MaterialSymbols.tune to 0xFF_546E7A.toInt()),
+        // ── people / calls ───────────────────────────────────────────────────
+        "联系人" to (MaterialSymbols.person to 0xFF_43A047.toInt()),
+        "在线状态" to (MaterialSymbols.verified_user to 0xFF_388E3C.toInt()),
+        "通话" to (MaterialSymbols.call to 0xFF_2E7D32.toInt()),
+        // ── media / misc ─────────────────────────────────────────────────────
+        "相机与媒体" to (MaterialSymbols.photo_camera to 0xFF_EF6C00.toInt()),
+        "链接" to (MaterialSymbols.interests to 0xFF_0288D1.toInt()),
+        // ── system ───────────────────────────────────────────────────────────
+        "通知与提醒" to (MaterialSymbols.notifications to 0xFF_E53935.toInt()),
+        "关于与更新" to (MaterialSymbols.info to 0xFF_5C6BC0.toInt()),
+        "调试" to (MaterialSymbols.settings to 0xFF_78909C.toInt()),
+    )
 
     /**
      * Open a category as a detail layer overlaid on the (still-present) level-1 list: its own
