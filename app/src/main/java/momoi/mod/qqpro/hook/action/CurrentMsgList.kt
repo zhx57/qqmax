@@ -279,6 +279,70 @@ object CurrentMsgList {
     private const val LOAD_GUARD_MAX_MS = 20_000L
 
     /**
+     * Ask for up to [pages] older pages back-to-back, waiting only for the list to GROW between
+     * requests rather than for each page's completion signal.
+     *
+     * Why: a large unread tail (690 messages measured in the field log) is 69 pages at the kernel's
+     * fixed 10 messages/page. Serially waiting for each page's `topPageResult` costs 120–340 ms per
+     * page — 10–25 s for one jump, which no user or UI moment survives. The kernel processes the
+     * requests back-to-back anyway, so the only thing the strict wait buys is correctness of the
+     * progress accounting; for a bulk catch-up we can simply keep requesting and watch the list
+     * length.
+     *
+     * Stops early when the list stops growing for [stallLimit] consecutive requests, or when the
+     * kernel reports the top of history. Returns the number of pages that actually landed.
+     */
+    fun pageUpFast(
+        pages: Int,
+        onProgress: (Int) -> Unit = {},
+        shouldContinue: () -> Boolean = { true },
+        onDone: (loaded: Int) -> Unit,
+    ) {
+        val startSize = msgList.value.size
+        var issued = 0
+        var stalls = 0
+
+        fun step() {
+            if (!shouldContinue()) {
+                Utils.log("pageUpFast: cancelled after $issued request(s)")
+                onDone(msgList.value.size - startSize)
+                return
+            }
+            if (issued >= pages) {
+                Utils.log("pageUpFast: reached request budget ($issued), size=$startSize->${msgList.value.size}")
+                onDone(msgList.value.size - startSize)
+                return
+            }
+            val before = msgList.value.size
+            issued++
+            onProgress(issued)
+            // Fire the request without arming the completion waiter: growth is the signal.
+            isLoadingMsg = false
+            vb.L(MsgListDataIntent.LoadTopPage("WatchAIOListVB"))
+            ThreadManager.runOnUiThread({
+                if (msgList.value.size > before) {
+                    stalls = 0
+                } else {
+                    stalls++
+                    if (stalls >= FAST_STALL_LIMIT) {
+                        Utils.log("pageUpFast: stalled $stalls times at size=${msgList.value.size}")
+                        onDone(msgList.value.size - startSize)
+                        return@runOnUiThread
+                    }
+                }
+                step()
+            }, FAST_PAGE_INTERVAL_MS)
+        }
+        step()
+    }
+
+    /** Consecutive non-growing requests before [pageUpFast] stops. */
+    private const val FAST_STALL_LIMIT = 6
+
+    /** Gap between back-to-back page requests in [pageUpFast]. */
+    private const val FAST_PAGE_INTERVAL_MS = 90L
+
+    /**
      * Request one page of older messages and wait specifically for the pre-page (older-history)
      * load result — NOT just any [msgList] mutation. Previously the loaders waited on
      * `msgList.observeOnce`, which fires on EVERY state push from the AIO framework (incoming msg,
@@ -375,25 +439,46 @@ object CurrentMsgList {
     }
 
     /**
-     * Scroll target is [count] messages above [current]. Pages in older messages until enough
-     * history is loaded, then invokes [callback] with the resulting list position.
+     * Jump to the "first unread" message, identified by SEQ rather than by counting.
      *
-     * [onProgress] is called with a 0..100 percentage after each page so the caller can show a
-     * loading indicator. [onFail] fires (on the UI thread) if a page load times out or the top of
-     * history is reached before the target — so the UI can show a toast and reset instead of
-     * hanging silently.
+     * The count-based [upwardMsg] has to page until the loaded list is `unreadTotal` items longer
+     * than it was. With 10 messages per page that is 69 pages for 690 unread — measured at
+     * 120–340 ms per page in the field log, so 10–25 seconds of continuous paging, and ANY hiccup
+     * (an empty page, a timeout, the user scrolling, the page being rebuilt) aborted the whole run.
+     * That is why the same tap "sometimes worked and sometimes didn't": it was never broken, just
+     * too slow to survive the moment.
+     *
+     * When the caller knows the target's msgSeq, [findMsg] pages straight to it without having to
+     * count, which is both faster and immune to the count being slightly off.
      */
+    fun jumpToFirstUnreadBySeq(
+        seq: Long,
+        onProgress: (Int) -> Unit = {},
+        onFail: () -> Unit = {},
+        shouldContinue: () -> Boolean = { true },
+        onFound: (WatchAIOMsgItem) -> Unit,
+    ) {
+        findMsg(seq, onProgress, result = { item ->
+            if (!shouldContinue()) {
+                Utils.log("jumpToFirstUnreadBySeq: cancelled before result")
+                return@findMsg
+            }
+            if (item == null) onFail() else onFound(item)
+        })
+    }
+
     fun upwardMsg(
         current: Int,
         count: Int,
         onProgress: (Int) -> Unit = {},
         onFail: () -> Unit = {},
+        shouldContinue: () -> Boolean = { true },
         callback: (Int) -> Unit
     ) {
         val target = msgList.value.size - 1 - current + count
         // A jump of `count` messages can need dozens of pages (3000 unread ≈ 25+ pages), so this
         // must behave like findMsg: retry unproductive pages instead of failing on the first one.
-        upwardMsgInternal(target, msgList.value.size, onProgress, onFail, callback, emptyPages = 0)
+        upwardMsgInternal(target, msgList.value.size, onProgress, onFail, shouldContinue, callback, emptyPages = 0)
     }
 
     private fun upwardMsgInternal(
@@ -401,9 +486,14 @@ object CurrentMsgList {
         startSize: Int,
         onProgress: (Int) -> Unit,
         onFail: () -> Unit,
+        shouldContinue: () -> Boolean,
         callback: (Int) -> Unit,
         emptyPages: Int,
     ) {
+        if (!shouldContinue()) {
+            Utils.log("upwardMsg: cancelled by caller at size=${msgList.value.size} target=$target")
+            return
+        }
         if (msgList.value.size >= target) {
             callback(msgList.value.size - target - 1)
             return
@@ -423,7 +513,7 @@ object CurrentMsgList {
                     onFail()
                 }
                 msgList.value.size > before ->
-                    upwardMsgInternal(target, startSize, onProgress, onFail, callback, emptyPages = 0)
+                    upwardMsgInternal(target, startSize, onProgress, onFail, shouldContinue, callback, emptyPages = 0)
                 emptyPages + 1 >= MAX_EMPTY_PAGES -> {
                     Utils.log("upwardMsg: $MAX_EMPTY_PAGES empty pages, giving up target=$target")
                     onFail()
@@ -432,7 +522,7 @@ object CurrentMsgList {
                     // Unproductive but not the end: retry automatically (see findMsg).
                     Utils.log("upwardMsg: empty page ${emptyPages + 1}/$MAX_EMPTY_PAGES, retrying")
                     ThreadManager.runOnUiThread({
-                        upwardMsgInternal(target, startSize, onProgress, onFail, callback, emptyPages + 1)
+                        upwardMsgInternal(target, startSize, onProgress, onFail, shouldContinue, callback, emptyPages + 1)
                     }, EMPTY_PAGE_RETRY_MS)
                 }
             }
@@ -442,7 +532,7 @@ object CurrentMsgList {
                 onFail()
             } else {
                 Utils.log("upwardMsg: page timeout ${emptyPages + 1}/$MAX_EMPTY_PAGES, retrying")
-                upwardMsgInternal(target, startSize, onProgress, onFail, callback, emptyPages + 1)
+                upwardMsgInternal(target, startSize, onProgress, onFail, shouldContinue, callback, emptyPages + 1)
             }
         })
     }

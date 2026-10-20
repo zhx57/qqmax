@@ -179,6 +179,11 @@ class SkipAction(
         // Remember where we are now and show the back-down button so the user can return here.
         BubbleTextView.beginJumpUp()
         isClicked = true
+        // Supersede any earlier jump still paging, and remember OUR generation: an older paging run
+        // compares against this and stops. (Must be captured AFTER the increment, or the comparison
+        // below would always be true and the guard would never fire.)
+        jumpGeneration++
+        val myGeneration = jumpGeneration
         // Drop the ↑ and show the spinner in its place immediately (indeterminate until the first
         // progress tick) so the press gives instant feedback that the jump is working.
         spinner.indeterminate = true
@@ -208,14 +213,45 @@ class SkipAction(
             // earlier important-stop jumps corrupt: paging in history drives it to 0/negative, which
             // made this branch silently no-op and left the chip stuck on screen. Retire it once done.
             if (list.isEmpty() || unreadTotal <= 0) { done(); hide(); return }
-            CurrentMsgList.upwardMsg(list.size - 1, (unreadTotal - 1).coerceAtLeast(0), onProgress, onFail) { idx ->
-                Utils.log("SkipAction: terminal jump -> first-unread idx=$idx (unreadTotal=$unreadTotal)")
-                done()
-                rv.safeSmoothToStart(idx)
-                hide()
+            // The unread tail can be hundreds of messages = dozens of pages at 10 msgs/page, which
+            // the strict per-page waiter needs 10–25 s to walk (measured). Bulk-page first without
+            // waiting on each page's completion signal, then do the precise final jump. Aborts
+            // cleanly if this jump was superseded (see jumpGeneration).
+            val continueFlag = { myGeneration == jumpGeneration && !isFinished }
+            val pagesNeeded = (unreadTotal / 10 + 4).coerceAtMost(200)
+            Utils.log("SkipAction: terminal jump, bulk paging up to $pagesNeeded pages for $unreadTotal unread")
+            CurrentMsgList.pageUpFast(
+                pagesNeeded,
+                onProgress = { issued ->
+                    // Keep the chip informative while the bulk pass runs.
+                    tv.text = "加载中 $issued 页"
+                },
+                shouldContinue = continueFlag,
+            ) {
+                if (!continueFlag()) { done(); return@pageUpFast }
+                Utils.log("SkipAction: bulk paging done, size=${CurrentMsgList.msgList.value.size}")
+                // Now the target is (at most) a page or two away: use the exact count-based walk.
+                CurrentMsgList.upwardMsg(
+                    CurrentMsgList.msgList.value.size - 1,
+                    (unreadTotal - 1).coerceAtLeast(0),
+                    onProgress,
+                    onFail,
+                    shouldContinue = continueFlag,
+                ) { idx ->
+                    Utils.log("SkipAction: terminal jump -> first-unread idx=$idx (unreadTotal=$unreadTotal)")
+                    done()
+                    rv.safeSmoothToStart(idx)
+                    hide()
+                }
             }
         }
     }
+
+    /**
+     * Bumped whenever a new jump starts, so an in-flight (long) paging run can tell it has been
+     * superseded and stop instead of finishing against stale state.
+     */
+    private var jumpGeneration = 0
 
     /**
      * Smooth-scroll [pos] to the top, but tolerate the out-of-range positions the count-based
