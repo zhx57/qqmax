@@ -33,7 +33,17 @@ object BigfaceRes {
 
     /**
      * Extract the bundled zip into `filesDir/qq_emoticon_res/` if the version marker is absent or
-     * stale. Idempotent and cheap on subsequent launches (just a marker file check).
+     * stale.
+     *
+     * NEVER call this on the main thread. It is invoked from
+     * [momoi.mod.qqpro.hook.EmojiConfigPatch.parseConfigData], which the QQ kernel calls
+     * SYNCHRONOUSLY during startup — unzipping the bundled 8 MB archive there (thousands of small
+     * lottie/png entries, each its own file write) blocked the main thread long enough to be the
+     * "点击图标后卡在启动器一两秒" delay. [ensureExtractedAsync] does the same work on a worker
+     * thread and is what the startup path uses; this blocking form is kept for explicit callers.
+     *
+     * Idempotent and cheap once the marker exists (a single isFile check), which is why the marker
+     * is written LAST: an interrupted extraction re-runs instead of leaving a half-populated dir.
      */
     fun ensureExtracted(app: Application) {
         try {
@@ -64,6 +74,27 @@ object BigfaceRes {
         } catch (e: Throwable) {
             log("BigfaceRes.ensureExtracted error: ${android.util.Log.getStackTraceString(e)}")
         }
+    }
+
+    /** Whether the bundled resources are already unpacked (one stat call — safe on the main thread). */
+    fun isExtracted(app: Application): Boolean =
+        File(File(app.filesDir, RES_DIRNAME), ".qqpro_bigface_v$VERSION").isFile
+
+    @Volatile
+    private var extractionStarted = false
+
+    /**
+     * Kick off extraction on a worker thread unless it is already done or running. Returns
+     * immediately; the startup path calls this instead of [ensureExtracted] so nothing heavy runs on
+     * the main thread.
+     */
+    fun ensureExtractedAsync(app: Application) {
+        if (extractionStarted || isExtracted(app)) return
+        extractionStarted = true
+        Thread({
+            ensureExtracted(app)
+            extractionStarted = false
+        }, "qqpro-bigface").apply { isDaemon = true }.start()
     }
 
     /**

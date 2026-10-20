@@ -22,7 +22,13 @@ class EmojiConfigPatch : QQSysFaceResImpl() {
     override fun parseConfigData(faceConfig: JSONObject?, aniSticker: JSONObject?) {
         try {
             // Place the bundled lottie/static/apng files where the renderer expects them.
-            BigfaceRes.ensureExtracted(Utils.application)
+            //
+            // ASYNC on purpose. This method is called SYNCHRONOUSLY by the kernel during startup,
+            // and the extraction is an 8 MB archive of thousands of small files — doing it inline
+            // blocked the main thread for long enough to be the "点击图标后卡在启动器一两秒"
+            // delay on first launch (and after every update that bumps BigfaceRes.VERSION). The
+            // worker thread does the unzip; this call only stats the marker file.
+            BigfaceRes.ensureExtractedAsync(Utils.application)
 
             val sysface = faceConfig?.optJSONArray("sysface")
             if (sysface != null) {
