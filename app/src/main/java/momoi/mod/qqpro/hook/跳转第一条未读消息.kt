@@ -184,64 +184,105 @@ class SkipAction(
         // below would always be true and the guard would never fire.)
         jumpGeneration++
         val myGeneration = jumpGeneration
+        // True while THIS jump is still the current one (not superseded, chip not retired).
+        val continueFlag = { myGeneration == jumpGeneration && !isFinished }
         // Drop the ↑ and show the spinner in its place immediately (indeterminate until the first
         // progress tick) so the press gives instant feedback that the jump is working.
         spinner.indeterminate = true
         spinner.progress = 0f
         spinner.visibility = View.VISIBLE
         refreshLabel(loading = true)
-        if (h.seq != null) {
-            // Important stop: locate the exact message (paging up if needed) and smooth-scroll to it.
-            CurrentMsgList.findMsg(h.seq, onProgress, result = { msg ->
-                if (msg == null) { onFail(); return@findMsg }
-                // Consume this stop NOW instead of waiting for the scroll listener to pop it: when the
-                // target is already on screen the smooth-scroll is a no-op, so onScrolled never fires and
-                // the chip would stay stuck on this stop forever (never advancing to the terminal
-                // "first unread" jump). Popping on tap guarantees the stepper always progresses.
-                if (head()?.seq == h.seq) points.removeFirstOrNull()
-                // Use the FOUND message's own msgSeq, not the stop's: the event payload may carry a
-                // slightly different seq (see CurrentMsgList.findFlexible), in which case jumping by
-                // the payload's value would re-resolve to nothing and the jump silently failed.
-                val realSeq = runCatching { msg.d.msgSeq }.getOrDefault(h.seq)
-                Utils.log("SkipAction: jumped stopSeq=${h.seq} realSeq=$realSeq, next=${head()?.label}")
-                done()
-                rv.jumpToSeqAndFlash(realSeq)
-            })
-        } else {
-            // Terminal "first unread" stop. Jump deterministically to the ORIGINAL first unread
-            // (unreadTotal messages up from the newest) rather than the running `count`, which the
-            // earlier important-stop jumps corrupt: paging in history drives it to 0/negative, which
-            // made this branch silently no-op and left the chip stuck on screen. Retire it once done.
-            if (list.isEmpty() || unreadTotal <= 0) { done(); hide(); return }
-            // The unread tail can be hundreds of messages = dozens of pages at 10 msgs/page, which
-            // the strict per-page waiter needs 10–25 s to walk (measured). Bulk-page first without
-            // waiting on each page's completion signal, then do the precise final jump. Aborts
-            // cleanly if this jump was superseded (see jumpGeneration).
-            val continueFlag = { myGeneration == jumpGeneration && !isFinished }
-            val pagesNeeded = (unreadTotal / 10 + 4).coerceAtMost(200)
-            Utils.log("SkipAction: terminal jump, bulk paging up to $pagesNeeded pages for $unreadTotal unread")
-            CurrentMsgList.pageUpFast(
-                pagesNeeded,
-                onProgress = { issued ->
-                    // Keep the chip informative while the bulk pass runs.
-                    tv.text = "加载中 $issued 页"
-                },
-                shouldContinue = continueFlag,
-            ) {
-                if (!continueFlag()) { done(); return@pageUpFast }
-                Utils.log("SkipAction: bulk paging done, size=${CurrentMsgList.msgList.value.size}")
-                // Now the target is (at most) a page or two away: use the exact count-based walk.
-                CurrentMsgList.upwardMsg(
-                    CurrentMsgList.msgList.value.size - 1,
-                    (unreadTotal - 1).coerceAtLeast(0),
-                    onProgress,
-                    onFail,
-                    shouldContinue = continueFlag,
-                ) { idx ->
-                    Utils.log("SkipAction: terminal jump -> first-unread idx=$idx (unreadTotal=$unreadTotal)")
+        val stopSeq = h.seq
+        if (stopSeq != null) {
+            // Important stop (@我 / 回复 / 新文件 / 新公告).
+            //
+            // The msgbox event behind this stop carries ONLY a msgSeq — no msgId — and that seq can
+            // drift from the record's own (server re-sync / cross-device delivery). That is why an
+            // exact-seq paging search could walk thousands of messages and still report "not found"
+            // for a message that exists. Ask the kernel once for the record at that seq (with a small
+            // window tolerance): a miss now means the message genuinely isn't on this device, and a
+            // hit hands us the REAL seq to search for.
+            CurrentMsgList.resolveRecordBySeq(stopSeq) { rec ->
+                if (!continueFlag()) { done(); return@resolveRecordBySeq }
+                if (rec == null) {
+                    Utils.log("SkipAction: stopSeq=$stopSeq has no local record — dropping stop")
+                    Utils.toast(tv.context, "本机没有这条消息")
+                    if (head()?.seq == stopSeq) points.removeFirstOrNull()
                     done()
-                    rv.safeSmoothToStart(idx)
-                    hide()
+                    return@resolveRecordBySeq
+                }
+                val realSeq = rec.msgSeq
+                Utils.log("SkipAction: stopSeq=$stopSeq resolved realSeq=$realSeq msgId=${rec.msgId}")
+                CurrentMsgList.findMsg(realSeq, onProgress, result = { msg ->
+                    if (!continueFlag()) { done(); return@findMsg }
+                    if (msg == null) { onFail(); return@findMsg }
+                    // Consume this stop NOW instead of waiting for the scroll listener to pop it: when the
+                    // target is already on screen the smooth-scroll is a no-op, so onScrolled never fires and
+                    // the chip would stay stuck on this stop forever (never advancing to the terminal
+                    // "first unread" jump). Popping on tap guarantees the stepper always progresses.
+                    if (head()?.seq == stopSeq) points.removeFirstOrNull()
+                    Utils.log("SkipAction: jumped stopSeq=$stopSeq realSeq=$realSeq, next=${head()?.label}")
+                    done()
+                    rv.jumpToSeqAndFlash(msg.d.msgSeq)
+                })
+            }
+        } else {
+            // Terminal "first unread" stop.
+            //
+            // The old code could only derive this position by COUNTING: page until the loaded list
+            // is `unreadTotal` items longer than it was. That guess is wrong whenever the
+            // conversation was read on another device (the cached count no longer lines up with
+            // the local tail) and it is what made this jump land on an arbitrary message or fail
+            // after a long crawl.
+            //
+            // The kernel knows the exact position (getFirstUnreadMsgSeq), so ask it. Bulk-paging
+            // first is still worth it (a 500-message unread tail is 50 pages, and the per-page
+            // waiter costs 120–340 ms), but the FINAL placement is now exact rather than counted.
+            if (list.isEmpty()) { done(); hide(); return }
+            val pagesNeeded = (unreadTotal / 10 + 4).coerceAtMost(200)
+            CurrentMsgList.firstUnreadSeq { nativeSeq ->
+                if (!continueFlag()) { done(); return@firstUnreadSeq }
+                Utils.log("SkipAction: terminal jump start, nativeFirstUnreadSeq=$nativeSeq unreadTotal=$unreadTotal pages=$pagesNeeded")
+                CurrentMsgList.pageUpFast(
+                    pagesNeeded,
+                    onProgress = { issued ->
+                        // Keep the chip informative while the bulk pass runs.
+                        tv.text = "加载中 $issued 页"
+                    },
+                    shouldContinue = continueFlag,
+                ) {
+                    if (!continueFlag()) { done(); return@pageUpFast }
+                    Utils.log("SkipAction: bulk paging done, size=${CurrentMsgList.msgList.value.size}")
+                    if (nativeSeq > 0L) {
+                        // Exact: locate the kernel's own first-unread message and jump to it.
+                        CurrentMsgList.findMsg(nativeSeq, onProgress, result = { msg ->
+                            if (!continueFlag()) { done(); return@findMsg }
+                            if (msg != null) {
+                                Utils.log("SkipAction: terminal jump -> native seq=$nativeSeq (exact)")
+                                done()
+                                rv.jumpToSeqAndFlash(msg.d.msgSeq)
+                            } else {
+                                Utils.log("SkipAction: native first-unread seq=$nativeSeq not in local history")
+                                done()
+                                Utils.toast(tv.context, "未读位置已失效，请重新进入会话")
+                            }
+                            hide()
+                        })
+                    } else {
+                        // Kernel couldn't answer: keep the old count-based walk as the fallback.
+                        CurrentMsgList.upwardMsg(
+                            CurrentMsgList.msgList.value.size - 1,
+                            (unreadTotal - 1).coerceAtLeast(0),
+                            onProgress,
+                            onFail,
+                            shouldContinue = continueFlag,
+                        ) { idx ->
+                            Utils.log("SkipAction: terminal jump -> counted idx=$idx (unreadTotal=$unreadTotal)")
+                            done()
+                            rv.safeSmoothToStart(idx)
+                            hide()
+                        }
+                    }
                 }
             }
         }

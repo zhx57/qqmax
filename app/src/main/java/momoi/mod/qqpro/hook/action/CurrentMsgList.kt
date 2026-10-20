@@ -14,6 +14,9 @@ import com.tencent.aio.data.msglist.IMsgItem
 import com.tencent.aio.main.fragment.ChatFragment
 import com.tencent.aio.part.root.panel.content.firstLevel.msglist.mvx.data.MsgListRepo
 import com.tencent.aio.part.root.panel.content.firstLevel.msglist.mvx.intent.MsgListDataIntent
+import com.tencent.qqnt.kernel.nativeinterface.Contact
+import com.tencent.qqnt.kernel.nativeinterface.MsgRecord
+import com.tencent.qqnt.msg.KernelServiceUtil
 import com.tencent.watch.aio_impl.coreImpl.repo.WatchMsgListRepo
 import com.tencent.watch.aio_impl.coreImpl.vb.WatchAIOListVB
 import com.tencent.watch.aio_impl.data.WatchAIOMsgItem
@@ -653,8 +656,17 @@ object CurrentMsgList {
         })
     }
 
-    /** Consecutive unproductive pages tolerated before a jump gives up. */
-    private const val MAX_EMPTY_PAGES = 4
+    /**
+     * Consecutive unproductive pages tolerated before a jump gives up.
+     *
+     * Was 4, which is exactly "40 messages then 加载失败" — the field complaint. One page is 10
+     * messages (measured), so 4 × 10 = 40. An unproductive page is usually NOT the end of history:
+     * the kernel answers a pre-page request with nothing while it is busy, still syncing, or while
+     * another load is in flight, and the very next request succeeds. `reachedTop` (the kernel's own
+     * LoadPrePageFail) is the only honest end-of-history signal, so be generous with the heuristic
+     * fallback — it costs ~250 ms per extra retry and nothing else.
+     */
+    private const val MAX_EMPTY_PAGES = 10
 
     /** Delay before retrying a page request that came back empty. */
     private const val EMPTY_PAGE_RETRY_MS = 250L
@@ -685,6 +697,247 @@ object CurrentMsgList {
 
     /** ±window used by [findFlexible]'s unique near-match fallback. */
     private const val NEAR_SEQ_WINDOW = 2L
+
+    // ── Kernel lookups: identify a jump target WITHOUT paging ────────────────────────────────────
+    // Everything below exists because the old jumps could only ever ask "is it in the pages I have
+    // loaded yet?" and then ask for one more page (10 messages) at a time. That is both slow and —
+    // decisively — matched on the WRONG key: reply/quote payloads carry a msgSeq that can differ
+    // from the one the locally synced list uses (a server re-sync, or the same message arriving
+    // over a different channel, reassigns the seq), while msgId is assigned once and never changes.
+    // An exact-seq search therefore walked thousands of messages and still reported "无法定位".
+    //
+    // The kernel can answer directly: one DB call by msgId both proves whether the record exists
+    // locally at all and returns its REAL msgSeq. Only if it is genuinely absent do we report a
+    // miss — no more paging forever.
+
+    /**
+     * A [Contact] for the currently open chat, built fresh each call.
+     *
+     * The kernel may keep what it is handed and [CurrentContact] is a mutable singleton that is
+     * rewritten on every chat switch, so the shared instance must never be passed through.
+     */
+    private fun currentContact(): Contact? {
+        val peer = CurrentContact.peerUid
+        if (peer.isNullOrEmpty()) return null
+        return Contact(CurrentContact.chatType, peer, CurrentContact.guildId)
+    }
+
+    /**
+     * Fetch message records from the kernel by msgId (one DB call, no paging). The result is
+     * delivered on the UI thread; an empty list means the record is NOT in the local DB — deleted,
+     * expired, or never synced to this device — in which case paging older pages can never find it.
+     */
+    fun fetchRecordsByMsgIds(msgIds: Collection<Long>, onResult: (List<MsgRecord>) -> Unit) {
+        val ids = msgIds.filter { it > 0L }
+        if (ids.isEmpty()) { onResult(emptyList()); return }
+        val contact = currentContact()
+        if (contact == null) { onResult(emptyList()); return }
+        runCatching {
+            KernelServiceUtil.c()?.getMsgsByMsgId(contact, ArrayList(ids)) { code, err, list ->
+                val out = list?.toList().orEmpty()
+                if (Utils.loggingEnabled) Utils.log(
+                    "kernel getMsgsByMsgId(${ids}) -> code=$code err=$err got=${out.size} " +
+                        "ids=${out.map { it.msgId }} seqs=${out.map { it.msgSeq }}"
+                )
+                ThreadManager.runOnUiThread({ onResult(out) })
+            }
+        }.onFailure {
+            Utils.log("fetchRecordsByMsgIds failed: $it")
+            onResult(emptyList())
+        }
+    }
+
+    /**
+     * The real first-unread msgSeq, straight from the kernel.
+     *
+     * Replaces guessing it from the cached unread COUNT, which is wrong whenever the conversation
+     * was read on another device (the count no longer lines up with the local tail) and made the
+     * terminal "first unread" jump land on an arbitrary message or fail outright.
+     *
+     * Delivers 0 when the kernel can't answer, so callers keep their old fallback.
+     */
+    fun firstUnreadSeq(onResult: (Long) -> Unit) {
+        val contact = currentContact()
+        if (contact == null) { onResult(0L); return }
+        runCatching {
+            KernelServiceUtil.c()?.getFirstUnreadMsgSeq(contact) { code, err, seq ->
+                if (Utils.loggingEnabled) Utils.log("kernel getFirstUnreadMsgSeq -> code=$code err=$err seq=$seq")
+                ThreadManager.runOnUiThread({ onResult(if (code == 0) seq else 0L) })
+            }
+        }.onFailure {
+            Utils.log("firstUnreadSeq failed: $it")
+            onResult(0L)
+        }
+    }
+
+    /**
+     * Resolve a **payload/event** msgSeq to the message record that actually exists locally.
+     *
+     * The msgbox highlight events (`SpecificEventTypeInfoInMsgBox` → `MsgBoxNecessaryMsgInfo`) carry
+     * ONLY a msgSeq — no msgId — and that seq can drift from the record's own (server re-sync,
+     * cross-device delivery). An exact-seq paging search then walks the whole history and reports
+     * "not found" for a message that is sitting right there.
+     *
+     * Asks the kernel by seq first, then by a small seq window, and hands back the REAL record (with
+     * its true msgSeq and msgId). `null` means this device genuinely has no such message, so callers
+     * can fail fast instead of paging.
+     */
+    fun resolveRecordBySeq(seq: Long, window: Long = 2L, onResult: (MsgRecord?) -> Unit) {
+        if (seq <= 0L) { onResult(null); return }
+        val contact = currentContact()
+        if (contact == null) { onResult(null); return }
+
+        // Fallback: accept a record inside the small drift window.
+        fun queryRange() {
+            runCatching {
+                KernelServiceUtil.c()?.getMsgsBySeqRange(contact, (seq - window).coerceAtLeast(1L), seq + window) { code, err, list ->
+                    val nearest = list?.filter { it.msgSeq > 0L }?.minByOrNull { kotlin.math.abs(it.msgSeq - seq) }
+                    if (Utils.loggingEnabled) Utils.log(
+                        "kernel getMsgsBySeqRange(${seq - window}..${seq + window}) -> code=$code err=$err " +
+                            "got=${list?.size ?: 0} nearestSeq=${nearest?.msgSeq}"
+                    )
+                    ThreadManager.runOnUiThread({ onResult(nearest) })
+                }
+            }.onFailure {
+                Utils.log("resolveRecordBySeq range failed: $it")
+                onResult(null)
+            }
+        }
+
+        runCatching {
+            KernelServiceUtil.c()?.getMsgsBySeqList(contact, arrayListOf(seq)) { code, err, list ->
+                val rec = list?.firstOrNull { it.msgSeq > 0L }
+                if (Utils.loggingEnabled) Utils.log(
+                    "kernel getMsgsBySeqList([$seq]) -> code=$code err=$err got=${list?.size ?: 0} " +
+                        "realSeq=${rec?.msgSeq} msgId=${rec?.msgId}"
+                )
+                ThreadManager.runOnUiThread({ if (rec != null) onResult(rec) else queryRange() })
+            }
+        }.onFailure {
+            Utils.log("resolveRecordBySeq exact failed: $it")
+            onResult(null)
+        }
+    }
+
+    /**
+     * Best-effort match of a jump target against the messages already loaded. msgId wins (immutable),
+     * then the exact seq, then the unique near-seq window used for payload/record seq drift.
+     */
+    private fun matchJumpTarget(msgId: Long, seqHint: Long?): WatchAIOMsgItem? {
+        val list = msgList.value
+        if (list.isEmpty()) return null
+        if (msgId > 0L) list.firstOrNull { it.d.msgId == msgId }?.let { return it }
+        if (seqHint == null || seqHint <= 0L) return null
+        list.firstOrNull { it.d.msgSeq == seqHint }?.let { return it }
+        val near = list.filter { it.d.msgSeq in (seqHint - NEAR_SEQ_WINDOW)..(seqHint + NEAR_SEQ_WINDOW) }
+        return if (near.size == 1) near[0] else null
+    }
+
+    /** The target if it is already loaded — lets a jump complete with zero paging. */
+    fun findLoadedByIdOrSeq(msgId: Long, seqHint: Long?): WatchAIOMsgItem? =
+        matchJumpTarget(msgId, seqHint)
+
+    /**
+     * Locate a message for a jump, cheapest step first:
+     *  1. the already-loaded list (msgId, then seq) — no I/O at all;
+     *  2. ONE kernel lookup by msgId, which both resolves the real msgSeq and tells us whether a
+     *     record exists locally (absent ⇒ report a miss instead of paging the whole history);
+     *  3. paging older history, matching msgId OR the resolved seq on every page.
+     *
+     * [result] receives `(item, reason)`: a non-null item on success, otherwise a user-facing
+     * reason so the caller can say WHY the jump failed instead of a generic "无法定位消息".
+     */
+    fun locateMessage(
+        msgId: Long,
+        seqHint: Long?,
+        onProgress: (Int) -> Unit = {},
+        repeatLimit: Int = 400,
+        shouldContinue: () -> Boolean = { true },
+        result: (WatchAIOMsgItem?, String?) -> Unit,
+    ) {
+        if (!shouldContinue()) { result(null, null); return }
+        matchJumpTarget(msgId, seqHint)?.let { result(it, null); return }
+        if (seqHint == null && msgId <= 0L) { result(null, "这条引用缺少定位信息"); return }
+
+        val startPaging: (Long?) -> Unit = { realSeq ->
+            if (!shouldContinue()) {
+                result(null, null)
+            } else {
+                matchJumpTarget(msgId, realSeq)?.let { result(it, null) }
+                    ?: findByIdInternal(msgId, realSeq, onProgress, shouldContinue, repeatLimit, 0) { item ->
+                        result(
+                            item,
+                            if (item != null) null
+                            else if (msgId <= 0L) "无法定位消息"
+                            else "本机没有这条消息（可能已被删除或过期）"
+                        )
+                    }
+            }
+        }
+
+        if (msgId > 0L) {
+            fetchRecordsByMsgIds(listOf(msgId)) { recs ->
+                val rec = recs.firstOrNull { it.msgId == msgId }
+                val realSeq = rec?.msgSeq?.takeIf { it > 0L } ?: seqHint
+                if (Utils.loggingEnabled) Utils.log("locateMessage: msgId=$msgId hintSeq=$seqHint realSeq=$realSeq local=${rec != null}")
+                startPaging(realSeq)
+            }
+        } else {
+            startPaging(seqHint)
+        }
+    }
+
+    /**
+     * Page older history until [msgId] (or [seqHint]) is loaded. Same shape as [findMsgInternal]
+     * but matches on msgId as well, which is what makes it immune to seq drift.
+     */
+    private fun findByIdInternal(
+        msgId: Long,
+        seqHint: Long?,
+        onProgress: (Int) -> Unit,
+        shouldContinue: () -> Boolean,
+        repeatCount: Int,
+        emptyPages: Int,
+        result: (WatchAIOMsgItem?) -> Unit,
+    ) {
+        if (!shouldContinue()) { result(null); return }
+        matchJumpTarget(msgId, seqHint)?.let { result(it); return }
+        if (repeatCount <= 0) {
+            Utils.log("findById: give up (repeat exhausted) msgId=$msgId seq=$seqHint")
+            result(null)
+            return
+        }
+        val sizeBefore = msgList.value.size
+        onProgress(sizeBefore)
+        loadOlderPage(15_000L, onResult = { reachedTop ->
+            val found = matchJumpTarget(msgId, seqHint)
+            when {
+                found != null -> result(found)
+                reachedTop -> {
+                    Utils.log("findById: reached top of history, msgId=$msgId seq=$seqHint not found")
+                    result(null)
+                }
+                msgList.value.size > sizeBefore ->
+                    findByIdInternal(msgId, seqHint, onProgress, shouldContinue, repeatCount - 1, 0, result)
+                emptyPages + 1 >= MAX_EMPTY_PAGES -> {
+                    Utils.log("findById: $MAX_EMPTY_PAGES empty pages in a row, msgId=$msgId not found")
+                    result(null)
+                }
+                else -> ThreadManager.runOnUiThread({
+                    findByIdInternal(msgId, seqHint, onProgress, shouldContinue, repeatCount - 1, emptyPages + 1, result)
+                }, EMPTY_PAGE_RETRY_MS)
+            }
+        }, onTimeout = {
+            if (!shouldContinue()) {
+                result(null)
+            } else if (emptyPages + 1 >= MAX_EMPTY_PAGES) {
+                Utils.log("findById: repeated timeouts, msgId=$msgId not found")
+                result(null)
+            } else {
+                findByIdInternal(msgId, seqHint, onProgress, shouldContinue, repeatCount - 1, emptyPages + 1, result)
+            }
+        })
+    }
 
     @Mixin
     class Hook : WatchAIOListVB() {
