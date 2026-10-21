@@ -77,7 +77,7 @@ class ContactListFragmentHook : ContactListFragment() {
     // Two cheap guards, both of which keep behaviour identical:
     //   1. coalesce per frame — several emits before the next draw produce one rebuild;
     //   2. skip a rebuild whose (sizes, counts) shape is unchanged AND that arrives within
-    //      [REBUILD_DEDUPE_MS] of the previous one. The time window is what makes it safe: a real
+    //      [RebuildGate.DEDUPE_MS] of the previous one. The time window is what makes it safe: a real
     //      content change always rebuilds eventually, we only swallow the startup burst.
     //
     // The state lives in [RebuildGate] (a top-level object), NOT in this class: fields with
@@ -135,7 +135,7 @@ class ContactListFragmentHook : ContactListFragment() {
         // Drop no-op rebuilds (see the de-duplication note above).
         val signature = "${friends.size}|${groups.size}|$friendCount|$groupCount"
         val now = android.os.SystemClock.uptimeMillis()
-        if (signature == RebuildGate.lastSignature && now - RebuildGate.lastAt < REBUILD_DEDUPE_MS) {
+        if (signature == RebuildGate.lastSignature && now - RebuildGate.lastAt < RebuildGate.DEDUPE_MS) {
             return
         }
         RebuildGate.lastSignature = signature
@@ -243,18 +243,32 @@ class ContactListFragmentHook : ContactListFragment() {
 }
 
 /**
- * Mutable rebuild state for [ContactListFragmentHook], kept OUT of the @Mixin class on purpose:
- * ApkMixin copies a mixin's fields into the target class but never runs the initialisers that would
- * have set them (no constructor hook), so a field whose initial value differs from the JVM default
- * would read as that default at runtime. Everything here is a plain top-level object, initialised
- * normally.
+ * Mutable rebuild state for [ContactListFragmentHook].
+ *
+ * ## Why this is a top-level object
+ * ApkMixin copies a mixin's methods into the TARGET class
+ * (`com.tencent.qqnt.watch.contact.ui.ContactListFragment`) but never runs the initialisers that
+ * would have set the mixin's own fields (no constructor hook), so state with a non-default initial
+ * value must not live in the @Mixin class.
+ *
+ * ## Why it is PUBLIC (not `private`)
+ * The copied methods execute as `ContactListFragment`, from `com.tencent.qqnt.watch.contact.ui` in
+ * the app's own dex. A `private` top-level declaration here is file-private and therefore invisible
+ * from there: the copied method throws
+ *
+ *     java.lang.IllegalAccessError: Illegal class access:
+ *     'com.tencent.qqnt.watch.contact.ui.ContactListFragment' attempting to access
+ *     'momoi.mod.qqpro.hook.contact.RebuildGate'
+ *
+ * at runtime — which is exactly what an earlier build did, crashing on open. Everything a mixin
+ * method touches from outside its own class must be public (or at least not private/internal).
  */
-private object RebuildGate {
+object RebuildGate {
     var lastSignature: String? = null
     var lastAt = 0L
     var scheduled = false
     var pending: Any? = null
-}
 
-/** Window in which an unchanged-shape rebuild is treated as a duplicate of the previous one. */
-private const val REBUILD_DEDUPE_MS = 400L
+    /** Window in which an unchanged-shape rebuild counts as a duplicate. Inlined as a literal. */
+    const val DEDUPE_MS = 400L
+}
