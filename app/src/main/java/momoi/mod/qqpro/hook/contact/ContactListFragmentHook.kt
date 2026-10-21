@@ -61,11 +61,40 @@ class ContactListFragmentHook : ContactListFragment() {
             liveData.removeObservers(this)
             liveData.observe(this, Observer { state ->
                 state ?: return@Observer
-                runCatching {
-                    rebuild(state, viewModel, adapter)
-                }.onFailure { Utils.log("ContactListFragmentHook: rebuild/submit failed: $it") }
+                scheduleRebuild(state, viewModel, adapter)
             })
         }.onFailure { Utils.log("ContactListFragmentHook onCreate: $it") }
+    }
+
+    // ── Rebuild de-duplication ────────────────────────────────────────────────────────────────
+    // The view-model emits several times while the state fills in, and LiveData re-delivers its last
+    // value on every resume. A field log showed EIGHT rebuilds inside 1.3 s during startup while
+    // only TWO distinct contents ever appeared (6× friends=0/groups=83, then 2× friends=102/
+    // groups=83). Each rebuild reads the state by reflection, reads both unread counts by
+    // reflection, refreshes the whole main navigation, allocates a ~185-item list and runs a full
+    // ListAdapter diff — so the duplicates were pure startup work.
+    //
+    // Two cheap guards, both of which keep behaviour identical:
+    //   1. coalesce per frame — several emits before the next draw produce one rebuild;
+    //   2. skip a rebuild whose (sizes, counts) shape is unchanged AND that arrives within
+    //      [REBUILD_DEDUPE_MS] of the previous one. The time window is what makes it safe: a real
+    //      content change always rebuilds eventually, we only swallow the startup burst.
+    //
+    // The state lives in [RebuildGate] (a top-level object), NOT in this class: fields with
+    // initialisers must never live in a @Mixin class — ApkMixin copies the field but not the
+    // initialiser that its constructor would have run.
+
+    private fun scheduleRebuild(state: Any, viewModel: Any, adapter: Any) {
+        RebuildGate.pending = state
+        if (RebuildGate.scheduled) return
+        RebuildGate.scheduled = true
+        momoi.mod.qqpro.util.ThreadManager.runOnUiThread({
+            RebuildGate.scheduled = false
+            val s = RebuildGate.pending ?: return@runOnUiThread
+            RebuildGate.pending = null
+            runCatching { rebuild(s, viewModel, adapter) }
+                .onFailure { Utils.log("ContactListFragmentHook: rebuild/submit failed: $it") }
+        })
     }
 
     override fun Y(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
@@ -102,6 +131,16 @@ class ContactListFragmentHook : ContactListFragment() {
         @Suppress("UNCHECKED_CAST")
         val groups = state.field("b") as List<ContactBaseItem>
         val (friendCount, groupCount) = readNotifyCounts(state, viewModel)
+
+        // Drop no-op rebuilds (see the de-duplication note above).
+        val signature = "${friends.size}|${groups.size}|$friendCount|$groupCount"
+        val now = android.os.SystemClock.uptimeMillis()
+        if (signature == RebuildGate.lastSignature && now - RebuildGate.lastAt < REBUILD_DEDUPE_MS) {
+            return
+        }
+        RebuildGate.lastSignature = signature
+        RebuildGate.lastAt = now
+
         // Publish to the main-page navigation so the contacts tab can show an unread badge, and so a
         // repeat-tap on the contacts nav cell can open whichever notification screen has a count.
         momoi.mod.qqpro.hook.MainNav.contactUnread = friendCount + groupCount
@@ -202,3 +241,20 @@ class ContactListFragmentHook : ContactListFragment() {
     /** Read an obfuscated public field by its raw name (searches the class hierarchy). */
     private fun Any.field(name: String): Any? = javaClass.getField(name).get(this)
 }
+
+/**
+ * Mutable rebuild state for [ContactListFragmentHook], kept OUT of the @Mixin class on purpose:
+ * ApkMixin copies a mixin's fields into the target class but never runs the initialisers that would
+ * have set them (no constructor hook), so a field whose initial value differs from the JVM default
+ * would read as that default at runtime. Everything here is a plain top-level object, initialised
+ * normally.
+ */
+private object RebuildGate {
+    var lastSignature: String? = null
+    var lastAt = 0L
+    var scheduled = false
+    var pending: Any? = null
+}
+
+/** Window in which an unchanged-shape rebuild is treated as a duplicate of the previous one. */
+private const val REBUILD_DEDUPE_MS = 400L
