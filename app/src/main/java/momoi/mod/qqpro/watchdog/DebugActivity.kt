@@ -163,6 +163,13 @@ class DebugActivity : Activity() {
     private fun buildReport(): String = buildString {
         append(runCatching { DeviceInfo.collect(this@DebugActivity) }
             .getOrElse { "== 设备信息 ==\n(收集失败: $it)\n" })
+        // Cold-start marks FIRST: this is the section the startup work is measured from, and it must
+        // be readable without adb/logcat (Boot writes unconditionally, not through the log switch).
+        append("\n== 启动时序 (Boot) ==\n")
+        append(runCatching {
+            val f = momoi.mod.qqpro.util.Boot.file
+            if (f == null || !f.exists()) "(无启动时序记录)" else tailOf(f, BOOT_TAIL_BYTES).ifBlank { "(空)" }
+        }.getOrElse { "(读取启动时序失败: $it)" })
         append("\n== 调试日志 ==\n")
         append(runCatching {
             // Logging is buffered; flush so the tail includes the most recent lines.
@@ -290,6 +297,7 @@ class DebugActivity : Activity() {
 
     companion object {
         private const val LOG_TAIL_BYTES = 64 * 1024
+        private const val BOOT_TAIL_BYTES = 32 * 1024
         private const val REQ_WRITE = 0x5101
     }
 }
