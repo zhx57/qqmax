@@ -18,6 +18,9 @@ import momoi.mod.qqpro.watchdog.Watchdog
 @Mixin
 class 更新检查 : MainActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Cold-start timing: entry into MainActivity.onCreate (the first of our hooks to run on the
+        // startup path) and its cost. See Boot for why this is a single cheap mark.
+        momoi.mod.qqpro.util.Boot.mark("MainActivity.onCreate entry")
         // Remove the TOS/privacy-agreement interstitial: the splash (nav start destination, shown
         // during this activity's lifecycle, after onCreate) routes to PrivacyLicenseFragment unless
         // PrivacyPolicyHelper.b() == "1". Pre-mark it agreed here so that gate passes straight through
@@ -27,10 +30,17 @@ class 更新检查 : MainActivity() {
                 .onFailure { Utils.log("LoginM3: pre-agree privacy failed: $it") }
         }
         super.onCreate(savedInstanceState)
+        momoi.mod.qqpro.util.Boot.mark("MainActivity.onCreate done")
         Watchdog.install(this)
         // Start online-presence polling once at launch if any status surface is enabled (the kernel
-        // won't push presence otherwise). Cheap no-op when all status toggles are off. See OnlineStatus.
-        if (Settings.anyOnlineStatus) momoi.mod.qqpro.hook.action.OnlineStatus.start()
+        // won't push presence otherwise). Deferred off onCreate: it resolves KernelServiceUtil.d()
+        // and registers a kernel listener, which is not needed to draw the first frame, and every
+        // status surface calls start() again itself when it appears (the call is idempotent).
+        if (Settings.anyOnlineStatus) {
+            momoi.mod.qqpro.util.ThreadManager.runOnUiThread({
+                runCatching { momoi.mod.qqpro.hook.action.OnlineStatus.start() }
+            }, 800L)
+        }
         // Run update check and notification check asynchronously so cold start stays buttery smooth.
         momoi.mod.qqpro.util.ThreadManager.runOnUiThread({
             runCatching {

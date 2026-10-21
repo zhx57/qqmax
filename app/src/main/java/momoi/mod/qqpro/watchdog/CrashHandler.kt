@@ -19,6 +19,8 @@ class CrashHandler(private val context: Context) : Thread.UncaughtExceptionHandl
         Log.e("Watchdog", "uncaught exception on thread ${t.name}", e)
         val stack = Log.getStackTraceString(e)
         Utils.log("Watchdog: uncaught exception on ${t.name}: $stack")
+        // Logging is buffered (see Utils.log); this is the last chance to get those lines on disk.
+        Utils.flushLog()
 
         val report = buildString {
             append("应用崩溃\n")

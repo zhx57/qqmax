@@ -346,11 +346,30 @@ object RichTitlebar {
         }.onFailure { Utils.log("RichTitlebar.buildFloating failed: $it") }
     }
 
+    /**
+     * Log the per-chat unread breakdown, but ONLY when it actually changed.
+     *
+     * [applyUnread] runs on every kernel unread push — several times a second while messages are
+     * arriving — and it used to log one line per unread chat on each call (10–12 chats ⇒ 20+ lines
+     * per push, each line paying logcat + a log-file write). Cold start is exactly when the push
+     * burst is heaviest, so this was measurable startup work spent on information that did not
+     * differ. One line, only on change.
+     */
+    private var lastBreakdownSignature: String? = null
+
+    private fun logBreakdownIfChanged() {
+        if (!Utils.loggingEnabled) return
+        val live = unread.entries.filter { it.value > 0 && it.key != peer }
+        val signature = live.joinToString(",") { "${it.key}:${it.value}" }
+        if (signature == lastBreakdownSignature) return
+        lastBreakdownSignature = signature
+        val text = if (live.isEmpty()) "(none)"
+        else live.joinToString(" ") { "${it.key}=${it.value}${if (RecentContacts.isDisturb(it.key)) "dnd" else ""}" }
+        Utils.log("RichTitlebar unread breakdown: $text")
+    }
+
     private fun applyUnread() {
-        // Exclude the current chat and any 免打扰 (DND) chats from the badge total.
-        unread.entries.filter { it.value > 0 && it.key != peer }.forEach {
-            Utils.log("RichTitlebar unread breakdown: peer=${it.key} cnt=${it.value} disturb=${RecentContacts.isDisturb(it.key)}")
-        }
+        logBreakdownIfChanged()
         val other = unread.entries
             .filter { it.key != peer && !RecentContacts.isDisturb(it.key) }
             .sumOf { it.value }

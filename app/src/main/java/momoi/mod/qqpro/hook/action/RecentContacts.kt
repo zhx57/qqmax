@@ -39,6 +39,7 @@ fun materializeChatRow(holder: WatchRecentContactHolder) {
 class ChatListMaterial : ChatListFragment() {
     override fun Y(p0: LayoutInflater, p1: ViewGroup?, p2: Bundle?): View {
         val root = super.Y(p0, p1, p2)!!
+        momoi.mod.qqpro.util.Boot.mark("conversation list view created")
         if (Settings.materialChatList.value) {
             root.setBackgroundColor(M3.surface)
             Utils.log("ChatListMaterial: list background materialized")
@@ -193,6 +194,8 @@ object RecentContacts {
         }
 
         override fun t(item: RecentContactChatItem, holder: WatchRecentContactHolder) {
+            // First row bind = the conversation list has CONTENT on screen (cold-start milestone).
+            momoi.mod.qqpro.util.Boot.mark("first conversation row bound")
             // Grey badge (muted) = isMsgDisturb (item.p) OR shieldFlag (item.q) not in {0,1}.
             val muted = isMuted(item.p, item.q)
             Utils.log("load recent contact: ${item.a.peerName}, unreadCnt: ${item.a.unreadCnt}, peerUid: ${item.a.peerUid}, muted=$muted (disturb=${item.p}, shieldFlag=${item.q})")

@@ -165,6 +165,8 @@ class DebugActivity : Activity() {
             .getOrElse { "== 设备信息 ==\n(收集失败: $it)\n" })
         append("\n== 调试日志 ==\n")
         append(runCatching {
+            // Logging is buffered; flush so the tail includes the most recent lines.
+            Utils.flushLog()
             val f = Utils.debugLogFile
             if (!f.exists()) "(无日志文件)" else tailOf(f, LOG_TAIL_BYTES).ifBlank { "(日志为空)" }
         }.getOrElse { "(读取日志失败: $it)" })

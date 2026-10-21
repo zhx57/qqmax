@@ -20,6 +20,8 @@ import org.json.JSONObject
 class EmojiConfigPatch : QQSysFaceResImpl() {
 
     override fun parseConfigData(faceConfig: JSONObject?, aniSticker: JSONObject?) {
+        // The kernel calls this SYNCHRONOUSLY during startup, so its position/cost are cold-start facts.
+        momoi.mod.qqpro.util.Boot.mark("face config parsed (emoji patch)")
         try {
             // Place the bundled lottie/static/apng files where the renderer expects them.
             //
