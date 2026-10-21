@@ -305,16 +305,16 @@ object CurrentMsgList {
         var issued = 0
         var stalls = 0
 
+        fun finish() = onDone(msgList.value.size - startSize)
+
         fun step() {
             if (!shouldContinue()) {
                 Utils.log("pageUpFast: cancelled after $issued request(s)")
-                onDone(msgList.value.size - startSize)
-                return
+                finish(); return
             }
             if (issued >= pages) {
                 Utils.log("pageUpFast: reached request budget ($issued), size=$startSize->${msgList.value.size}")
-                onDone(msgList.value.size - startSize)
-                return
+                finish(); return
             }
             val before = msgList.value.size
             issued++
@@ -322,19 +322,33 @@ object CurrentMsgList {
             // Fire the request without arming the completion waiter: growth is the signal.
             isLoadingMsg = false
             vb.L(MsgListDataIntent.LoadTopPage("WatchAIOListVB"))
-            ThreadManager.runOnUiThread({
+
+            // POLL for the growth instead of sampling once after a fixed gap. One page costs
+            // 30–300 ms in the field log, so a single 90 ms sample saw "no growth" on most healthy
+            // pages, and six of those in a row aborted the whole bulk pass long before the
+            // requested history had loaded — the jump then "could not locate" a message that was
+            // still thousands of messages away because the pass had quietly stopped at ~40.
+            var waited = 0L
+            fun check() {
+                if (!shouldContinue()) { finish(); return }
                 if (msgList.value.size > before) {
                     stalls = 0
-                } else {
+                    step()
+                    return
+                }
+                waited += FAST_POLL_MS
+                if (waited >= FAST_PAGE_WAIT_MS) {
                     stalls++
                     if (stalls >= FAST_STALL_LIMIT) {
                         Utils.log("pageUpFast: stalled $stalls times at size=${msgList.value.size}")
-                        onDone(msgList.value.size - startSize)
-                        return@runOnUiThread
+                        finish(); return
                     }
+                    step()
+                    return
                 }
-                step()
-            }, FAST_PAGE_INTERVAL_MS)
+                ThreadManager.runOnUiThread({ check() }, FAST_POLL_MS)
+            }
+            ThreadManager.runOnUiThread({ check() }, FAST_POLL_MS)
         }
         step()
     }
@@ -342,8 +356,11 @@ object CurrentMsgList {
     /** Consecutive non-growing requests before [pageUpFast] stops. */
     private const val FAST_STALL_LIMIT = 6
 
-    /** Gap between back-to-back page requests in [pageUpFast]. */
-    private const val FAST_PAGE_INTERVAL_MS = 90L
+    /** How often a pending page is re-checked for growth. */
+    private const val FAST_POLL_MS = 40L
+
+    /** How long one page may take before it counts as unproductive. */
+    private const val FAST_PAGE_WAIT_MS = 1_200L
 
     /**
      * Request one page of older messages and wait specifically for the pre-page (older-history)

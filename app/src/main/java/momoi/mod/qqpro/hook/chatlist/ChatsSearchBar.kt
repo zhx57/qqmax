@@ -119,13 +119,41 @@ object ChatsSearchBar {
         }
         field = bar.tag as? EditText
         barView = bar
+        resultsList = resultList
         emptyHint = hint
         resultsLayerId = resultsLayer
 
         bindListWhenReady(wrap, 0)
         installBackHandler(wrap)
+        // Measure the bar once it has been laid out. The RESULT list needs this even when the
+        // conversation list is never resolved (it is an overlay surface of its own), so it is
+        // measured here rather than inside [attachCollapse].
+        bar.post {
+            runCatching {
+                if (barView !== bar) return@post
+                barHeight = bar.height
+                applyResultsPadding()
+                Utils.log("ChatsSearchBar: bar measured height=$barHeight")
+            }
+        }
         Utils.log("ChatsSearchBar: wrapped host root (floating bar over list)")
         return wrap
+    }
+
+    /**
+     * Reserve the floating bar's height at the top of the RESULT list.
+     *
+     * The bar used to be its own row, so results started below it automatically; now that the bar
+     * floats over the content, without this the first result row is covered by the field (the
+     * reported "search results overlap"). 4dp of breathing room above the first card is kept.
+     */
+    private fun applyResultsPadding() {
+        val rv = resultsList ?: return
+        if (barHeight <= 0) return
+        runCatching {
+            rv.setPadding(rv.paddingLeft, 4.dp + barHeight, rv.paddingRight, rv.paddingBottom)
+            rv.requestLayout()
+        }.onFailure { Utils.log("ChatsSearchBar: applyResultsPadding failed: $it") }
     }
 
     // ── collapse-on-scroll ─────────────────────────────────────────────────────────────────────
@@ -142,6 +170,7 @@ object ChatsSearchBar {
     // [detach], so leaving and re-entering the page can never leave the list mis-padded.
 
     private var barView: View? = null
+    private var resultsList: RecyclerView? = null
     private var barHeight = 0
     private var collapseOffset = 0
     private var savedListPaddingTop = -1
@@ -171,7 +200,7 @@ object ChatsSearchBar {
                 // The page can be torn down between install() and this post (fast page switch):
                 // never pad a list we no longer own.
                 if (barView !== bar) return@post
-                val h = bar.height
+                val h = if (barHeight > 0) barHeight else bar.height
                 if (h <= 0) {
                     Utils.log("ChatsSearchBar: bar height 0, collapse skipped")
                     return@post
@@ -314,6 +343,7 @@ object ChatsSearchBar {
         list = null
         resultsLayerId = null
         barView = null
+        resultsList = null
         barHeight = 0
         collapseOffset = 0
         query = ""

@@ -237,12 +237,37 @@ class SkipAction(
             //
             // The kernel knows the exact position (getFirstUnreadMsgSeq), so ask it. Bulk-paging
             // first is still worth it (a 500-message unread tail is 50 pages, and the per-page
-            // waiter costs 120–340 ms), but the FINAL placement is now exact rather than counted.
+            // waiter costs 120–340 ms), but the FINAL placement is exact rather than counted.
+            //
+            // Never dead-end on a miss: the native seq CAN be stale (the conversation was read on
+            // another device, or the record was cleaned locally), and a jump that refuses to move
+            // at all is worse than one that lands approximately. So every failure below degrades to
+            // the count-based walk, which is what the feature did before.
             if (list.isEmpty()) { done(); hide(); return }
-            val pagesNeeded = (unreadTotal / 10 + 4).coerceAtMost(200)
-            CurrentMsgList.firstUnreadSeq { nativeSeq ->
-                if (!continueFlag()) { done(); return@firstUnreadSeq }
-                Utils.log("SkipAction: terminal jump start, nativeFirstUnreadSeq=$nativeSeq unreadTotal=$unreadTotal pages=$pagesNeeded")
+            val pagesNeeded = (unreadTotal / 10 + 8).coerceAtMost(400)
+
+            fun countFallback() {
+                Utils.log("SkipAction: terminal jump -> count-based fallback (unreadTotal=$unreadTotal)")
+                val fail: () -> Unit = {
+                    done()
+                    Utils.toast(tv.context, "没能定位到未读位置，请上滑手动查找")
+                }
+                CurrentMsgList.upwardMsg(
+                    CurrentMsgList.msgList.value.size - 1,
+                    (unreadTotal - 1).coerceAtLeast(0),
+                    onProgress,
+                    fail,
+                    shouldContinue = continueFlag,
+                ) { idx ->
+                    Utils.log("SkipAction: terminal jump -> counted idx=$idx (unreadTotal=$unreadTotal)")
+                    done()
+                    rv.safeSmoothToStart(idx)
+                    hide()
+                }
+            }
+
+            // Bulk-page first, then place the jump. targetId is 0 when we only have a seq.
+            fun jumpTo(targetId: Long, targetSeq: Long?) {
                 CurrentMsgList.pageUpFast(
                     pagesNeeded,
                     onProgress = { issued ->
@@ -252,36 +277,52 @@ class SkipAction(
                     shouldContinue = continueFlag,
                 ) {
                     if (!continueFlag()) { done(); return@pageUpFast }
-                    Utils.log("SkipAction: bulk paging done, size=${CurrentMsgList.msgList.value.size}")
-                    if (nativeSeq > 0L) {
-                        // Exact: locate the kernel's own first-unread message and jump to it.
-                        CurrentMsgList.findMsg(nativeSeq, onProgress, result = { msg ->
-                            if (!continueFlag()) { done(); return@findMsg }
-                            if (msg != null) {
-                                Utils.log("SkipAction: terminal jump -> native seq=$nativeSeq (exact)")
-                                done()
-                                rv.jumpToSeqAndFlash(msg.d.msgSeq)
-                            } else {
-                                Utils.log("SkipAction: native first-unread seq=$nativeSeq not in local history")
-                                done()
-                                Utils.toast(tv.context, "未读位置已失效，请重新进入会话")
-                            }
-                            hide()
-                        })
-                    } else {
-                        // Kernel couldn't answer: keep the old count-based walk as the fallback.
-                        CurrentMsgList.upwardMsg(
-                            CurrentMsgList.msgList.value.size - 1,
-                            (unreadTotal - 1).coerceAtLeast(0),
-                            onProgress,
-                            onFail,
-                            shouldContinue = continueFlag,
-                        ) { idx ->
-                            Utils.log("SkipAction: terminal jump -> counted idx=$idx (unreadTotal=$unreadTotal)")
+                    Utils.log(
+                        "SkipAction: bulk paging done, size=${CurrentMsgList.msgList.value.size} " +
+                            "targetId=$targetId targetSeq=$targetSeq"
+                    )
+                    CurrentMsgList.locateMessage(
+                        msgId = targetId,
+                        seqHint = targetSeq,
+                        onProgress = onProgress,
+                        // Generous: a 1000-message unread tail is 100 pages, and the bulk pass
+                        // above can fall short when the kernel is slow. The hard stop is the
+                        // kernel's own end-of-history plus the empty-page guard.
+                        repeatLimit = 600,
+                        shouldContinue = continueFlag,
+                    ) { item, reason ->
+                        if (!continueFlag()) { done(); return@locateMessage }
+                        if (item != null) {
+                            Utils.log("SkipAction: terminal jump -> located msgId=${item.d.msgId} seq=${item.d.msgSeq}")
                             done()
-                            rv.safeSmoothToStart(idx)
+                            rv.jumpToSeqAndFlash(item.d.msgSeq)
                             hide()
+                        } else {
+                            Utils.log("SkipAction: locate failed ($reason) — degrading to count-based move")
+                            countFallback()
                         }
+                    }
+                }
+            }
+
+            CurrentMsgList.firstUnreadSeq { nativeSeq ->
+                if (!continueFlag()) { done(); return@firstUnreadSeq }
+                Utils.log("SkipAction: terminal jump start, nativeFirstUnreadSeq=$nativeSeq unreadTotal=$unreadTotal pages=$pagesNeeded")
+                if (nativeSeq <= 0L) {
+                    jumpTo(0L, null)
+                    return@firstUnreadSeq
+                }
+                // Turn the seq into the REAL local record first: a seq with no local record can
+                // never be found by paging, so it must fall through to counting immediately
+                // instead of burning the whole page budget first.
+                CurrentMsgList.resolveRecordBySeq(nativeSeq) { rec ->
+                    if (!continueFlag()) { done(); return@resolveRecordBySeq }
+                    if (rec != null) {
+                        Utils.log("SkipAction: native first-unread resolved msgId=${rec.msgId} seq=${rec.msgSeq}")
+                        jumpTo(rec.msgId, rec.msgSeq)
+                    } else {
+                        Utils.log("SkipAction: native seq=$nativeSeq has no local record — count-based move")
+                        jumpTo(0L, null)
                     }
                 }
             }
