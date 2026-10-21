@@ -1,7 +1,6 @@
 package momoi.mod.qqpro.hook.chatlist
 
 import android.content.Context
-import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
@@ -20,7 +19,20 @@ import momoi.mod.qqpro.lib.material.MaterialSymbols
 import momoi.mod.qqpro.util.Utils
 
 /**
- * Always-visible search box for the messages page (1st main page).
+ * Search box for the messages page (1st main page).
+ *
+ * ## Layout: a floating field that scrolls away with the list
+ *
+ * The bar is an OVERLAY pinned to the top-right of the page, on top of the conversation list, with
+ * the list given top padding equal to the bar height. It is therefore not a permanent toolbar row
+ * (that used to eat a full row of a watch screen forever): scrolling the list down translates the
+ * bar up by the scrolled distance, so it leaves the screen after about one bar height and returns
+ * the moment the list is back at the top. See [attachCollapse]. While a query is active the bar is
+ * pinned again, because it holds the text being edited and the clear button.
+ *
+ * The native list itself is never re-parented, re-adaptered or re-rowed — only its top padding is
+ * changed, and the original value is restored in [detach], so the page can never come back
+ * mis-padded.
  *
  * ## Design: a separate result list, never a modified conversation list
  *
@@ -88,31 +100,125 @@ object ChatsSearchBar {
             addView(hint, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.CENTER))
         }
 
-        // bar and content stack VERTICALLY (a horizontal split, not an overlay): the search field
-        // gets its own row and the list starts below it, so the bar can never cover the first
-        // conversation row. The content area is weighted 1 so it takes the remaining height.
         val content = FrameLayout(ctx).apply {
             addView(root, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(resultsLayer, FrameLayout.LayoutParams(MATCH, MATCH))
         }
 
-        val wrap = LinearLayout(ctx).apply {
+        // The bar OVERLAYS the list instead of owning its own row (it used to be a second row of a
+        // vertical LinearLayout, i.e. permanently pinned at the top and always costing that height).
+        // It scrolls away with the list instead — see [attachCollapse] — so the page looks like a
+        // plain conversation list with a floating search field on it.
+        val wrap = FrameLayout(ctx).apply {
             tag = TAG
-            orientation = LinearLayout.VERTICAL
             // The pager will assign its own LayoutParams when it attaches this; until then it must
             // still hold a valid instance (null would throw in setLayoutParams).
             layoutParams = ViewGroup.LayoutParams(MATCH, MATCH)
-            addView(bar, LinearLayout.LayoutParams(MATCH, WRAP))
-            addView(content, LinearLayout.LayoutParams(MATCH, 0, 1f))
+            addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
+            addView(bar, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
         }
         field = bar.tag as? EditText
+        barView = bar
         emptyHint = hint
         resultsLayerId = resultsLayer
 
         bindListWhenReady(wrap, 0)
         installBackHandler(wrap)
-        Utils.log("ChatsSearchBar: wrapped host root (bar row + content row)")
+        Utils.log("ChatsSearchBar: wrapped host root (floating bar over list)")
         return wrap
+    }
+
+    // ── collapse-on-scroll ─────────────────────────────────────────────────────────────────────
+    //
+    // The search field must stop being a fixed toolbar without disturbing the native conversation
+    // list. So the list is never re-parented, re-adaptered or re-rowed: we only (a) add top padding
+    // equal to the bar height — plain empty scrollable space, the same thing the page already does
+    // with bottom padding for the nav bar — and (b) translate the bar up by the accumulated scroll
+    // distance, clamped to its own height. Because the padding is part of the scrolled content, the
+    // bar visually rides the bottom edge of that space and leaves the screen after ~one bar height,
+    // then comes straight back when the list is scrolled to the top again.
+    //
+    // Restoring is exact: [savedListPaddingTop] is the original value and is written back in
+    // [detach], so leaving and re-entering the page can never leave the list mis-padded.
+
+    private var barView: View? = null
+    private var barHeight = 0
+    private var collapseOffset = 0
+    private var savedListPaddingTop = -1
+    private var collapseList: RecyclerView? = null
+
+    private val collapseScrollListener = object : RecyclerView.OnScrollListener() {
+        override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+            // While a query is open the bar is pinned (it holds the text being edited).
+            if (query.isNotEmpty()) {
+                collapseOffset = 0
+            } else {
+                collapseOffset = (collapseOffset + dy).coerceIn(0, barHeight.coerceAtLeast(0))
+            }
+            applyCollapse()
+        }
+    }
+
+    /** Install the padding + scroll tracking once the native list has been found. */
+    private fun attachCollapse(rv: RecyclerView) {
+        val bar = barView ?: return
+        if (collapseList === rv) return
+        restoreListPadding()
+        rv.removeOnScrollListener(collapseScrollListener)
+        collapseList = rv
+        bar.post {
+            runCatching {
+                // The page can be torn down between install() and this post (fast page switch):
+                // never pad a list we no longer own.
+                if (barView !== bar) return@post
+                val h = bar.height
+                if (h <= 0) {
+                    Utils.log("ChatsSearchBar: bar height 0, collapse skipped")
+                    return@post
+                }
+                barHeight = h
+                savedListPaddingTop = rv.paddingTop
+                // Only reserve empty scrollable space; clipToPadding is deliberately left alone —
+                // MainNav manages it for the page (content draws behind the translucent nav bar)
+                // and forcing it here would change that. Content passing UNDER the floating bar
+                // while scrolling is expected: that is what makes it look attached to the list.
+                rv.setPadding(rv.paddingLeft, savedListPaddingTop + h, rv.paddingRight, rv.paddingBottom)
+                collapseOffset = 0
+                rv.addOnScrollListener(collapseScrollListener)
+                applyCollapse()
+                Utils.log("ChatsSearchBar: collapse installed (barH=$h padTop=$savedListPaddingTop)")
+            }.onFailure { Utils.log("ChatsSearchBar: attachCollapse failed: $it") }
+        }
+    }
+
+    private fun applyCollapse() {
+        val bar = barView ?: return
+        if (barHeight <= 0) return
+        if (query.isNotEmpty()) {
+            bar.translationY = 0f
+            if (bar.visibility != View.VISIBLE) bar.visibility = View.VISIBLE
+            return
+        }
+        bar.translationY = -collapseOffset.toFloat()
+        // Fully scrolled away: drop it so it can't swallow touches meant for the list. It comes
+        // back as soon as the accumulated offset falls below its height (scroll back to the top).
+        val gone = collapseOffset >= barHeight
+        val want = if (gone) View.GONE else View.VISIBLE
+        if (bar.visibility != want) bar.visibility = want
+    }
+
+    /** Put the conversation list's original top padding back (idempotent). */
+    private fun restoreListPadding() {
+        val rv = collapseList ?: return
+        if (savedListPaddingTop >= 0) {
+            runCatching {
+                rv.setPadding(rv.paddingLeft, savedListPaddingTop, rv.paddingRight, rv.paddingBottom)
+            }
+        }
+        runCatching { rv.removeOnScrollListener(collapseScrollListener) }
+        collapseList = null
+        savedListPaddingTop = -1
+        collapseOffset = 0
     }
 
     /**
@@ -180,6 +286,7 @@ object ChatsSearchBar {
         if (rv != null) {
             list = rv
             Utils.log("ChatsSearchBar: conversation list resolved (${rv.javaClass.simpleName})")
+            attachCollapse(rv)
             return
         }
         if (attempt >= 40) {
@@ -198,11 +305,17 @@ object ChatsSearchBar {
         runCatching { backCallback?.remove() }
         backCallback = null
         backHandlerInstalled = false
+        // Put the conversation list's original top padding back before dropping the reference, so
+        // re-entering the page never inherits our collapse padding.
+        restoreListPadding()
         field = null
         resultsAdapter = null
         emptyHint = null
         list = null
         resultsLayerId = null
+        barView = null
+        barHeight = 0
+        collapseOffset = 0
         query = ""
     }
 
@@ -251,8 +364,10 @@ object ChatsSearchBar {
         return LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(12.dp, 8.dp, 12.dp, 6.dp)
-            background = GradientDrawable().apply { setColor(M3.surface) }
+            // Transparent, tight row: the field is a floating pill sitting ON the conversation list
+            // rather than a toolbar strip above it. The old opaque full-width fill was what made it
+            // read as a fixed bar even before it started scrolling away.
+            setPadding(10.dp, 6.dp, 10.dp, 4.dp)
             addView(et, LinearLayout.LayoutParams(0, WRAP, 1f))
             addView(clear, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = 4.dp })
             // Hand the field out to the object state without a second constructor path.
@@ -315,11 +430,15 @@ object ChatsSearchBar {
             emptyHint?.visibility = View.GONE
             // Give the list keyboard focus back to the conversation list's own state: just drop it.
             field?.clearFocus()
+            applyCollapse()
             return
         }
         val rows = collectChats()
         val q = query
         val hits = rows.filter { it.matches(q) }
+        // A live query pins the bar back to the top: the field holds the text being edited and the
+        // clear button lives in it, so it must never be scrolled out of reach.
+        applyCollapse()
         layer.visibility = View.VISIBLE
         layer.bringToFront()
         resultsAdapter?.submit(hits)
