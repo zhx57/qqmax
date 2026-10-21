@@ -744,23 +744,59 @@ object CurrentMsgList {
      * delivered on the UI thread; an empty list means the record is NOT in the local DB — deleted,
      * expired, or never synced to this device — in which case paging older pages can never find it.
      */
+    /**
+     * Hard deadline for every kernel lookup below.
+     *
+     * These calls are async and their callback is NOT guaranteed. `KernelServiceUtil.c()` can be
+     * null — and because the call site used `?.`, that silently dropped the request: no exception,
+     * no callback, nothing. A native impl can likewise never call back for an id it can't resolve.
+     * The observed field failure was exactly that: `getFirstUnreadMsgSeq` answered 1224970, then
+     * `getMsgsBySeqList` was issued and NEVER returned, so the jump sat on a spinner forever
+     * ("无限的加载"). Every lookup now resolves through a settled-flag + timeout, so the caller is
+     * always told something and can fall back.
+     */
+    private const val KERNEL_TIMEOUT_MS = 1_500L
+
+    /** The kernel message service, or null when it isn't available (callers must fall back). */
+    private fun msgService(): com.tencent.qqnt.kernel.api.IMsgService? =
+        runCatching { KernelServiceUtil.c() }.getOrNull()
+
+    /**
+     * Fetch message records from the kernel by msgId (one DB call, no paging). The result is
+     * delivered on the UI thread; an empty list means the record is NOT in the local DB — deleted,
+     * expired, or never synced to this device — in which case paging older pages can never find it.
+     */
     fun fetchRecordsByMsgIds(msgIds: Collection<Long>, onResult: (List<MsgRecord>) -> Unit) {
         val ids = msgIds.filter { it > 0L }
         if (ids.isEmpty()) { onResult(emptyList()); return }
         val contact = currentContact()
         if (contact == null) { onResult(emptyList()); return }
+        val svc = msgService()
+        if (svc == null) {
+            Utils.log("kernel getMsgsByMsgId(${ids}): IMsgService unavailable")
+            onResult(emptyList())
+            return
+        }
+        var settled = false
+        val deliver = { list: List<MsgRecord> ->
+            if (!settled) { settled = true; onResult(list) }
+        }
+        ThreadManager.runOnUiThread({
+            if (!settled) Utils.log("kernel getMsgsByMsgId(${ids}) TIMEOUT after ${KERNEL_TIMEOUT_MS}ms")
+            deliver(emptyList())
+        }, KERNEL_TIMEOUT_MS)
         runCatching {
-            KernelServiceUtil.c()?.getMsgsByMsgId(contact, ArrayList(ids)) { code, err, list ->
+            svc.getMsgsByMsgId(contact, ArrayList(ids)) { code, err, list ->
                 val out = list?.toList().orEmpty()
                 if (Utils.loggingEnabled) Utils.log(
                     "kernel getMsgsByMsgId(${ids}) -> code=$code err=$err got=${out.size} " +
                         "ids=${out.map { it.msgId }} seqs=${out.map { it.msgSeq }}"
                 )
-                ThreadManager.runOnUiThread({ onResult(out) })
+                ThreadManager.runOnUiThread({ deliver(out) })
             }
         }.onFailure {
             Utils.log("fetchRecordsByMsgIds failed: $it")
-            onResult(emptyList())
+            deliver(emptyList())
         }
     }
 
@@ -771,19 +807,34 @@ object CurrentMsgList {
      * was read on another device (the count no longer lines up with the local tail) and made the
      * terminal "first unread" jump land on an arbitrary message or fail outright.
      *
-     * Delivers 0 when the kernel can't answer, so callers keep their old fallback.
+     * Delivers 0 when the kernel can't answer (including on timeout), so callers keep their
+     * fallback instead of waiting forever.
      */
     fun firstUnreadSeq(onResult: (Long) -> Unit) {
         val contact = currentContact()
         if (contact == null) { onResult(0L); return }
+        val svc = msgService()
+        if (svc == null) {
+            Utils.log("kernel getFirstUnreadMsgSeq: IMsgService unavailable")
+            onResult(0L)
+            return
+        }
+        var settled = false
+        val deliver = { seq: Long ->
+            if (!settled) { settled = true; onResult(seq) }
+        }
+        ThreadManager.runOnUiThread({
+            if (!settled) Utils.log("kernel getFirstUnreadMsgSeq TIMEOUT after ${KERNEL_TIMEOUT_MS}ms")
+            deliver(0L)
+        }, KERNEL_TIMEOUT_MS)
         runCatching {
-            KernelServiceUtil.c()?.getFirstUnreadMsgSeq(contact) { code, err, seq ->
+            svc.getFirstUnreadMsgSeq(contact) { code, err, seq ->
                 if (Utils.loggingEnabled) Utils.log("kernel getFirstUnreadMsgSeq -> code=$code err=$err seq=$seq")
-                ThreadManager.runOnUiThread({ onResult(if (code == 0) seq else 0L) })
+                ThreadManager.runOnUiThread({ deliver(if (code == 0) seq else 0L) })
             }
         }.onFailure {
             Utils.log("firstUnreadSeq failed: $it")
-            onResult(0L)
+            deliver(0L)
         }
     }
 
@@ -796,43 +847,58 @@ object CurrentMsgList {
      * "not found" for a message that is sitting right there.
      *
      * Asks the kernel by seq first, then by a small seq window, and hands back the REAL record (with
-     * its true msgSeq and msgId). `null` means this device genuinely has no such message, so callers
-     * can fail fast instead of paging.
+     * its true msgSeq and msgId). `null` means this device genuinely has no such message, or the
+     * kernel didn't answer in time, so callers fall back instead of paging blindly.
      */
     fun resolveRecordBySeq(seq: Long, window: Long = 2L, onResult: (MsgRecord?) -> Unit) {
         if (seq <= 0L) { onResult(null); return }
         val contact = currentContact()
         if (contact == null) { onResult(null); return }
+        val svc = msgService()
+        if (svc == null) {
+            Utils.log("kernel getMsgsBySeqList: IMsgService unavailable")
+            onResult(null)
+            return
+        }
+        var settled = false
+        val deliver = { rec: MsgRecord? ->
+            if (!settled) { settled = true; onResult(rec) }
+        }
+        // One deadline for the whole two-stage lookup.
+        ThreadManager.runOnUiThread({
+            if (!settled) Utils.log("resolveRecordBySeq(${seq}) TIMEOUT after ${KERNEL_TIMEOUT_MS * 2}ms")
+            deliver(null)
+        }, KERNEL_TIMEOUT_MS * 2)
 
         // Fallback: accept a record inside the small drift window.
         fun queryRange() {
             runCatching {
-                KernelServiceUtil.c()?.getMsgsBySeqRange(contact, (seq - window).coerceAtLeast(1L), seq + window) { code, err, list ->
+                svc.getMsgsBySeqRange(contact, (seq - window).coerceAtLeast(1L), seq + window) { code, err, list ->
                     val nearest = list?.filter { it.msgSeq > 0L }?.minByOrNull { kotlin.math.abs(it.msgSeq - seq) }
                     if (Utils.loggingEnabled) Utils.log(
                         "kernel getMsgsBySeqRange(${seq - window}..${seq + window}) -> code=$code err=$err " +
                             "got=${list?.size ?: 0} nearestSeq=${nearest?.msgSeq}"
                     )
-                    ThreadManager.runOnUiThread({ onResult(nearest) })
+                    ThreadManager.runOnUiThread({ deliver(nearest) })
                 }
             }.onFailure {
                 Utils.log("resolveRecordBySeq range failed: $it")
-                onResult(null)
+                deliver(null)
             }
         }
 
         runCatching {
-            KernelServiceUtil.c()?.getMsgsBySeqList(contact, arrayListOf(seq)) { code, err, list ->
+            svc.getMsgsBySeqList(contact, arrayListOf(seq)) { code, err, list ->
                 val rec = list?.firstOrNull { it.msgSeq > 0L }
                 if (Utils.loggingEnabled) Utils.log(
                     "kernel getMsgsBySeqList([$seq]) -> code=$code err=$err got=${list?.size ?: 0} " +
                         "realSeq=${rec?.msgSeq} msgId=${rec?.msgId}"
                 )
-                ThreadManager.runOnUiThread({ if (rec != null) onResult(rec) else queryRange() })
+                ThreadManager.runOnUiThread({ if (rec != null) deliver(rec) else queryRange() })
             }
         }.onFailure {
             Utils.log("resolveRecordBySeq exact failed: $it")
-            onResult(null)
+            deliver(null)
         }
     }
 

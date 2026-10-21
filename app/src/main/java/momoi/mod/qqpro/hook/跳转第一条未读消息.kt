@@ -285,10 +285,12 @@ class SkipAction(
                         msgId = targetId,
                         seqHint = targetSeq,
                         onProgress = onProgress,
-                        // Generous: a 1000-message unread tail is 100 pages, and the bulk pass
-                        // above can fall short when the kernel is slow. The hard stop is the
-                        // kernel's own end-of-history plus the empty-page guard.
-                        repeatLimit = 600,
+                        // Bounded on purpose. The bulk pass above already covered the estimated
+                        // distance; if the seq still isn't in the loaded list after ~30 more pages
+                        // it is the wrong numbering (the kernel's first-unread seq doesn't always
+                        // match the local msgSeq), and the counted move below is the better answer
+                        // anyway. A huge budget here just spins the spinner.
+                        repeatLimit = 30,
                         shouldContinue = continueFlag,
                     ) { item, reason ->
                         if (!continueFlag()) { done(); return@locateMessage }
@@ -308,23 +310,11 @@ class SkipAction(
             CurrentMsgList.firstUnreadSeq { nativeSeq ->
                 if (!continueFlag()) { done(); return@firstUnreadSeq }
                 Utils.log("SkipAction: terminal jump start, nativeFirstUnreadSeq=$nativeSeq unreadTotal=$unreadTotal pages=$pagesNeeded")
-                if (nativeSeq <= 0L) {
-                    jumpTo(0L, null)
-                    return@firstUnreadSeq
-                }
-                // Turn the seq into the REAL local record first: a seq with no local record can
-                // never be found by paging, so it must fall through to counting immediately
-                // instead of burning the whole page budget first.
-                CurrentMsgList.resolveRecordBySeq(nativeSeq) { rec ->
-                    if (!continueFlag()) { done(); return@resolveRecordBySeq }
-                    if (rec != null) {
-                        Utils.log("SkipAction: native first-unread resolved msgId=${rec.msgId} seq=${rec.msgSeq}")
-                        jumpTo(rec.msgId, rec.msgSeq)
-                    } else {
-                        Utils.log("SkipAction: native seq=$nativeSeq has no local record — count-based move")
-                        jumpTo(0L, null)
-                    }
-                }
+                // Straight to paging + counting. Deliberately NO extra kernel round-trip on this
+                // path: resolveRecordBySeq used to run here and, when its callback never arrived,
+                // the jump spun forever. With msgId=0 locateMessage issues no kernel call at all —
+                // it just pages and matches the seq, then degrades to counting.
+                jumpTo(0L, if (nativeSeq > 0L) nativeSeq else null)
             }
         }
     }
